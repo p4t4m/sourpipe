@@ -26,6 +26,21 @@ xcodebuild -project SourPipe.xcodeproj -scheme SourPipe \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
+### Installing without a Mac
+
+Every push builds an unsigned IPA in GitHub Actions: open the latest **iOS** run and download the
+`SourPipe-unsigned-ipa` artifact. iOS only installs signed apps, so a sideloading tool has to sign it
+with your Apple ID:
+
+- **Windows:** [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io).
+- **Linux:** no official tool from those projects. Community tools exist, or use a Windows machine or
+  VM with USB access once. [SideStore](https://sidestore.io) can then refresh from the phone itself.
+
+With a free Apple ID the app stops opening after 7 days until it is re-signed; a paid developer account
+extends that to a year. Developer Mode must be on under Settings > Privacy & Security. These tools are
+third party and have not been tested with this app. Using a throwaway Apple ID is reasonable, as they
+need your Apple ID credentials.
+
 ## What it does
 
 - Browse, search with filters and suggestions, or paste a link (also `sourpipe://open?url=<link>`).
@@ -123,10 +138,17 @@ cd ios && FIXTURE_DIR=/tmp/fixtures swift test
 
 `BUN_JSC_useJIT=0` runs the harness without a JIT, which is how JavaScriptCore runs inside iOS apps.
 
-## Known upstream behaviour
+CI also launches the app in a simulator and plays a media.ccc.de file and a PeerTube HLS stream. It
+cannot play YouTube, which refuses data-center addresses with a "not a bot" error.
+
+## Known behaviour
 
 YouTube's `Trending` kiosk currently fails with `Could not get Trending name`. The other YouTube
 sections work, and the default is `live`.
+
+YouTube's bot check can also affect home connections and VPNs. The app reports it and does not try to
+get around it. NewPipeExtractor's `PoTokenProvider` hook is not implemented here, so if YouTube starts
+requiring those tokens more widely, playback may fail until that is added.
 
 ## Licence
 

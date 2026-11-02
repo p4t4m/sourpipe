@@ -32,13 +32,19 @@ public enum Format {
         compact(value).map { $0 + " views" }
     }
 
+    /// Some services give a timestamp where others give "3 days ago"; show only its date.
+    public static func date(_ text: String) -> String {
+        let isTimestamp = text.range(of: #"^\d{4}-\d{2}-\d{2}T"#, options: .regularExpression) != nil
+        return isTimestamp ? String(text.prefix(10)) : text
+    }
+
     public static func subtitle(for item: InfoItem) -> String {
         var parts: [String] = []
         switch item.type {
         case .stream:
             if let uploader = item.uploaderName, !uploader.isEmpty { parts.append(uploader) }
             if let views = views(item.viewCount) { parts.append(views) }
-            if let date = item.textualUploadDate, !date.isEmpty { parts.append(date) }
+            if let date = item.textualUploadDate, !date.isEmpty { parts.append(Self.date(date)) }
         case .channel:
             if let subs = compact(item.subscriberCount) { parts.append(subs + " subscribers") }
             if let count = compact(item.streamCount) { parts.append(count + " videos") }

@@ -101,6 +101,11 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Format.kioskTitle("trending_movies_and_shows"), "Movies And Shows")
     }
 
+    func testTimestampsShowOnlyTheDate() {
+        XCTAssertEqual(Format.date("2026-10-28T19:28:59.546Z"), "2026-10-28")
+        XCTAssertEqual(Format.date("3 days ago"), "3 days ago")
+    }
+
     func testHtmlIsStripped() {
         XCTAssertEqual(HTMLText.plain("a<br>b &amp; <a href=\"x\">c</a>", isHTML: true), "a\nb & c")
         XCTAssertEqual(HTMLText.plain("a<b", isHTML: false), "a<b")

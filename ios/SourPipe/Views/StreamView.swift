@@ -223,7 +223,7 @@ struct StreamDetailsSection: View {
         var parts: [String] = []
         if let views = Format.views(details.viewCount) { parts.append(views) }
         if let likes = Format.compact(details.likeCount) { parts.append(likes + " likes") }
-        if let date = details.textualUploadDate, !date.isEmpty { parts.append(date) }
+        if let date = details.textualUploadDate, !date.isEmpty { parts.append(Format.date(date)) }
         if isCurrent, !player.sourceLabel.isEmpty { parts.append(player.sourceLabel) }
         return parts.joined(separator: " • ")
     }
