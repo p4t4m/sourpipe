@@ -13,6 +13,12 @@ final class PlayerController: ObservableObject {
         case failed(String)
     }
 
+    /// NewPipe's three players: the main one, audio only in the background, and the popup,
+    /// which on iOS is Picture in Picture.
+    enum PlayMode {
+        case normal, background, popup
+    }
+
     struct QueueEntry: Identifiable, Equatable {
         let id = UUID()
         let item: InfoItem
@@ -36,6 +42,9 @@ final class PlayerController: ObservableObject {
     @Published private(set) var offeredSkip: SponsorSegment?
     /// The segment just skipped automatically, shown briefly with an undo.
     @Published private(set) var recentSkip: SponsorSegment?
+
+    /// Set when playback should move into Picture in Picture; PopupHost starts it and clears it.
+    @Published var popupRequested = false
 
     let player = AVPlayer()
     var isInPictureInPicture = false {
@@ -82,12 +91,20 @@ final class PlayerController: ObservableObject {
 
     // MARK: Queue
 
-    func play(_ item: InfoItem) {
-        setQueue([QueueEntry(item: item)], start: 0)
+    func play(_ item: InfoItem, mode: PlayMode = .normal) {
+        play([item], startingAt: 0, mode: mode)
     }
 
-    func play(_ items: [InfoItem], startingAt start: Int) {
-        setQueue(items.filter { $0.type == .stream }.map { QueueEntry(item: $0) }, start: start)
+    func play(_ items: [InfoItem], startingAt start: Int, mode: PlayMode = .normal) {
+        let entries = items.filter { $0.type == .stream }.map { QueueEntry(item: $0) }
+        guard !entries.isEmpty else { return }
+        switch mode {
+        case .normal: isAudioOnly = store.library.settings.audioOnly
+        case .background: isAudioOnly = true
+        case .popup: isAudioOnly = false
+        }
+        setQueue(entries, start: start)
+        popupRequested = mode == .popup
     }
 
     func playDownload(_ record: DownloadRecord) {

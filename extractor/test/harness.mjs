@@ -144,12 +144,14 @@ const tests = {
   },
   ytKiosk: async () => {
     const svc = (await call("services")).services[YT];
+    check(!svc.kiosks.includes("Trending") && svc.defaultKiosk !== "Trending", "Trending hidden");
     const out = [];
     for (const id of svc.kiosks) {
       try { const r = await call("kiosk", { serviceId: YT, id }); out.push(`${id}:${r.items.length}`); }
       catch (e) { out.push(`${id}:ERR(${e.message.slice(0, 60)})`); }
     }
-    return out.join(" ");
+    check(!out.some((o) => o.includes(":ERR(")), "every kiosk loads");
+    return out.join(" ") + " default=" + svc.defaultKiosk;
   },
   soundcloud: async () => {
     const r = await call("search", { serviceId: SC, query: "ambient", filter: "tracks" });

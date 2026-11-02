@@ -62,6 +62,8 @@ extension View {
 
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var downloads: DownloadManager
     @State private var showingPlayer = false
     @State private var linkTarget: Route?
     @State private var linkError: String?
@@ -79,9 +81,8 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showingPlayer) {
-            NavigationStack {
+            RoutedStack {
                 NowPlayingScreen()
-                    .withRoutes()
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") { showingPlayer = false }
@@ -90,9 +91,8 @@ struct RootView: View {
             }
         }
         .sheet(item: $linkTarget) { route in
-            NavigationStack {
+            RoutedStack {
                 RouteScreen(route: route)
-                    .withRoutes()
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") { linkTarget = nil }
@@ -107,6 +107,15 @@ struct RootView: View {
         } message: {
             Text(linkError ?? "")
         }
+        .background(alignment: .topLeading) {
+            // Must be in the window for Picture in Picture to start from it; covered by the app.
+            PopupHost(player: player) { showingPlayer = true }
+                .frame(width: 2, height: 2)
+        }
+        .tint(store.library.settings.themeColor.color)
+        .onAppear { applyWindowTheme() }
+        .onChange(of: store.library.settings.themeColor) { _ in applyWindowTheme() }
+        .onChange(of: store.library.settings.appearance) { _ in applyWindowTheme() }
         .onOpenURL { open($0) }
         #if DEBUG
         // CI launches with `-openLink <url>`: a sourpipe:// link would stop at a system prompt.
@@ -115,11 +124,36 @@ struct RootView: View {
                let url = URL(string: page) {
                 CaptchaSolver.shared.request(url)
             }
+            // `-testPopup <url>` plays in the popup; `-testDownload <url>` saves an audio track.
+            if let link = UserDefaults.standard.string(forKey: "testPopup"),
+               case .stream(let item)? = try? await LinkResolver.route(for: link) {
+                player.play(item, mode: .popup)
+            }
+            if let link = UserDefaults.standard.string(forKey: "testDownload"),
+               case .stream(let item)? = try? await LinkResolver.route(for: link),
+               let details = try? await Extractor.stream(serviceId: item.serviceId, url: link) {
+                let options = PlaybackPlanner.downloadOptions(for: details)
+                if let option = options.first(where: { $0.label.hasPrefix("Audio") }) ?? options.last {
+                    NSLog("[download] test: %@", option.label)
+                    downloads.start(option, details: details)
+                }
+            }
             if let link = UserDefaults.standard.string(forKey: "openLink") {
                 linkTarget = try? await LinkResolver.route(for: link)
             }
         }
         #endif
+    }
+
+    /// UIKit parts (alerts, sheets, the system player) take colour and style from the window.
+    private func applyWindowTheme() {
+        let settings = store.library.settings
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows {
+                window.tintColor = UIColor(settings.themeColor.color)
+                window.overrideUserInterfaceStyle = settings.appearance.style
+            }
+        }
     }
 
     /// Handles sourpipe://open?url=<link>, and links rewritten as sourpipe://host/path.
@@ -145,19 +179,19 @@ struct RootView: View {
 
     private var tabs: some View {
         TabView {
-            NavigationStack { HomeView().withRoutes() }
+            RoutedStack { HomeView() }
                 .miniPlayerInset(showing: $showingPlayer)
                 .tabItem { Label("Home", systemImage: "flame") }
-            NavigationStack { SearchView().withRoutes() }
+            RoutedStack { SearchView() }
                 .miniPlayerInset(showing: $showingPlayer)
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
-            NavigationStack { FeedView().withRoutes() }
+            RoutedStack { FeedView() }
                 .miniPlayerInset(showing: $showingPlayer)
                 .tabItem { Label("Feed", systemImage: "rectangle.stack") }
-            NavigationStack { LibraryView().withRoutes() }
+            RoutedStack { LibraryView() }
                 .miniPlayerInset(showing: $showingPlayer)
                 .tabItem { Label("Library", systemImage: "books.vertical") }
-            NavigationStack { SettingsView().withRoutes() }
+            RoutedStack { SettingsView() }
                 .miniPlayerInset(showing: $showingPlayer)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

@@ -25,6 +25,9 @@ struct ChannelView: View {
                     Task { await load() }
                 }
             }
+            if model.items.contains(where: { $0.type == .stream }) {
+                PlayAllButtons(items: model.items)
+            }
             if let tabError = model.error {
                 Text(tabError).font(.footnote).foregroundColor(.secondary)
             }

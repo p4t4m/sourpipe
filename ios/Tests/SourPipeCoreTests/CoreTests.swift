@@ -438,4 +438,50 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(ExtractorFailure.self,
                                               from: Data(#"{"kind":"network","message":"m"}"#.utf8)).url)
     }
+
+    func testCustomisationSettingsSurviveOldAndUnknownData() throws {
+        let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"language":"de"}"#.utf8))
+        XCTAssertEqual(old.streamMenu, MenuEntrySetting.defaults)
+        XCTAssertEqual(old.homePages, [.serviceSections])
+        XCTAssertEqual(old.themeColor, .green)
+
+        var settings = AppSettings()
+        settings.streamMenu = [MenuEntrySetting(entry: .share, shown: false),
+                               MenuEntrySetting(entry: .background)]
+        settings.homePages = [.feed, .kiosk(serviceId: 0, id: "live"),
+                              .channel(serviceId: 0, url: "https://y/c", name: "C")]
+        settings.themeColor = .purple
+        let decoded = try JSONDecoder().decode(AppSettings.self,
+                                               from: JSONEncoder().encode(settings))
+        XCTAssertEqual(decoded.homePages, settings.homePages)
+        XCTAssertEqual(decoded.themeColor, .purple)
+        XCTAssertEqual(decoded.streamMenu.prefix(2).map(\.entry), [.share, .background])
+        XCTAssertFalse(decoded.streamMenu[0].shown)
+        XCTAssertEqual(decoded.streamMenu.count, StreamMenuEntry.allCases.count)
+
+        let future = try JSONDecoder().decode(AppSettings.self, from: Data(
+            (#"{"language":"fr","themeColor":"plaid","homePages":[{"somethingNew":{}}],"#
+             + #""streamMenu":[{"entry":"teleport","shown":true}]}"#).utf8))
+        XCTAssertEqual(future.language, "fr")
+        XCTAssertEqual(future.themeColor, .green)
+        XCTAssertEqual(future.homePages, [.serviceSections])
+        XCTAssertEqual(future.streamMenu, MenuEntrySetting.defaults)
+    }
+
+    func testMarkWatchedStopsResume() {
+        var library = LibraryData()
+        var item = InfoItem(type: .stream, serviceId: 0, url: "https://y/w", name: "W")
+        item.duration = 600
+        library.recordWatch(item, position: 120)
+        XCTAssertEqual(library.resumePosition(url: item.url, duration: 600), 120)
+        library.markWatched(item)
+        XCTAssertNil(library.resumePosition(url: item.url, duration: 600))
+        XCTAssertEqual(library.history.count, 1)
+    }
+
+    func testContentRangeTotal() {
+        XCTAssertEqual(ByteRange.total(contentRange: "bytes 0-8388607/1362269481"), 1_362_269_481)
+        XCTAssertNil(ByteRange.total(contentRange: "bytes 0-99/*"))
+        XCTAssertNil(ByteRange.total(contentRange: nil))
+    }
 }

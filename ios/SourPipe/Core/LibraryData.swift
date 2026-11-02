@@ -79,13 +79,17 @@ public struct AppSettings: Codable, Equatable {
     public var sponsorBlock = SponsorBlockSettings()
     public var dislikesEnabled = false
     public var dislikesServer = ReturnYouTubeDislikeAPI.defaultServer
+    public var streamMenu = MenuEntrySetting.defaults
+    public var homePages = HomePage.defaults
+    public var themeColor = ThemeColor.green
+    public var appearance = Appearance.system
 
     public init() {}
 
     enum CodingKeys: CodingKey {
         case serviceId, language, country, maxHeight, audioOnly, autoplayRelated, resumePlayback
         case recordHistory, showComments, hideShorts, sponsorBlockEnabled, sponsorBlock
-        case dislikesEnabled, dislikesServer
+        case dislikesEnabled, dislikesServer, streamMenu, homePages, themeColor, appearance
     }
 
     /// Every key is optional: a file saved by an older version must load, not fail as a whole.
@@ -108,6 +112,15 @@ public struct AppSettings: Codable, Equatable {
         sponsorBlock = try value(.sponsorBlock, SponsorBlockSettings())
         dislikesEnabled = try value(.dislikesEnabled, false)
         dislikesServer = try value(.dislikesServer, ReturnYouTubeDislikeAPI.defaultServer)
+        // Choices a later version may extend: an unknown value resets only that setting.
+        func lenient<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? c.decodeIfPresent(T.self, forKey: key)) ?? fallback
+        }
+        streamMenu = MenuEntrySetting.normalised(lenient(.streamMenu, []))
+        homePages = lenient(.homePages, HomePage.defaults)
+        if homePages.isEmpty { homePages = HomePage.defaults }
+        themeColor = lenient(.themeColor, ThemeColor.green)
+        appearance = lenient(.appearance, Appearance.system)
     }
 }
 
@@ -164,6 +177,14 @@ public struct LibraryData: Codable, Equatable {
         if history.count > Self.historyLimit {
             history.removeLast(history.count - Self.historyLimit)
         }
+    }
+
+    /// Watched to the end, as NewPipe's "Mark as watched" does.
+    public mutating func markWatched(_ item: InfoItem, at date: Date = Date()) {
+        let length = Double(item.duration ?? 0)
+        let repeats = history.first { $0.item.url == item.url }?.repeatCount
+        recordWatch(item, position: length > 0 ? length : 1, at: date)
+        history[0].repeatCount = repeats
     }
 
     public mutating func updatePosition(url: String, position: Double) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct SourPipeApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store: AppStore
     @StateObject private var player: PlayerController
     @StateObject private var downloads: DownloadManager

@@ -31,6 +31,14 @@ struct SettingsView: View {
                 Toggle("Show comments", isOn: $store.library.settings.showComments)
                 Toggle("Hide Shorts", isOn: $store.library.settings.hideShorts)
             }
+            Section("Appearance") {
+                ThemeColorPicker(selection: $store.library.settings.themeColor)
+                Picker("Theme", selection: $store.library.settings.appearance) {
+                    ForEach(Appearance.allCases) { Text($0.title).tag($0) }
+                }
+                NavigationLink("Home sections") { HomePagesSettingsView() }
+                NavigationLink("Long-press menu") { StreamMenuSettingsView() }
+            }
             Section("Playback") {
                 Picker("Maximum quality", selection: Binding(
                     get: { store.library.settings.maxHeight },

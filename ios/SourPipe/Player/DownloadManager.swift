@@ -69,6 +69,8 @@ final class DownloadManager: ObservableObject {
                 update(id) { $0.phase = "Combining" }
                 try await Self.mux(video: videoFile, audio: audioFile, to: destination)
             }
+            let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            NSLog("[download] saved %@ (%ld bytes)", fileName, size)
             store.library.downloads.insert(
                 DownloadRecord(item: details.asItem, label: source.label,
                                fileName: "Downloads/" + fileName, isAudio: isAudio), at: 0)
@@ -76,25 +78,108 @@ final class DownloadManager: ObservableObject {
         } catch is CancellationError {
             jobs.removeAll { $0.id == id }
         } catch {
+            NSLog("[download] failed: %@", error.localizedDescription)
             update(id) { $0.error = error.localizedDescription }
         }
     }
 
     private func fetch(_ url: URL, id: UUID, from: Double, to: Double) async throws -> URL {
-        let (bytes, response) = try await URLSession.shared.download(from: url, delegate: Progress {
-            [weak self] fraction in
+        try await Self.fetchInChunks(url) { [weak self] fraction in
             Task { @MainActor in
-                self?.update(id) { $0.progress = from + (to - from) * fraction }
+                self?.update(id) { $0.progress = from + (to - from) * min(fraction, 1) }
             }
-        })
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            try? FileManager.default.removeItem(at: bytes)
-            throw ExtractorFailure(kind: "network", message: "HTTP \(http.statusCode)")
         }
-        let keep = FileManager.default.temporaryDirectory
+    }
+
+    /// YouTube sends a whole file at a trickle: an audio stream stalled after 290 KB, while ranged
+    /// requests for the same URL ran at full speed. So fetch in ranges, as NewPipe does.
+    nonisolated private static let chunkSize: Int64 = 8 << 20
+
+    nonisolated private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.httpAdditionalHeaders = ["User-Agent": ExtractorEngine.userAgent]
+        return URLSession(configuration: configuration)
+    }()
+
+    nonisolated private static func fetchInChunks(
+        _ url: URL, report: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        let output = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".mp4")
-        try FileManager.default.moveItem(at: bytes, to: keep)
-        return keep
+        FileManager.default.createFile(atPath: output.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: output)
+        var closed = false
+        defer { if !closed { try? handle.close() } }
+        var offset: Int64 = 0
+        var total: Int64?
+        do {
+            while total.map({ offset < $0 }) ?? true {
+                try Task.checkCancellation()
+                var request = URLRequest(url: url)
+                request.setValue("bytes=\(offset)-\(offset + chunkSize - 1)",
+                                 forHTTPHeaderField: "Range")
+                let start = offset
+                let knownTotal = total
+                let (file, response) = try await withRetries {
+                    try await session.download(for: request, delegate: Progress { fraction in
+                        guard let knownTotal, knownTotal > 0 else { return }
+                        let size = min(chunkSize, knownTotal - start)
+                        report((Double(start) + fraction * Double(size)) / Double(knownTotal))
+                    })
+                }
+                defer { try? FileManager.default.removeItem(at: file) }
+                guard let http = response as? HTTPURLResponse else {
+                    throw ExtractorFailure(kind: "network", message: "No HTTP response")
+                }
+                if http.statusCode == 200 && offset == 0 {
+                    // The server ignored the range and sent everything.
+                    try handle.close()
+                    closed = true
+                    try FileManager.default.removeItem(at: output)
+                    try FileManager.default.moveItem(at: file, to: output)
+                    report(1)
+                    return output
+                }
+                guard http.statusCode == 206 else {
+                    throw ExtractorFailure(kind: "network", message: "HTTP \(http.statusCode)")
+                }
+                let data = try Data(contentsOf: file, options: .mappedIfSafe)
+                guard !data.isEmpty else {
+                    throw ExtractorFailure(kind: "network", message: "Empty response")
+                }
+                try handle.write(contentsOf: data)
+                offset += Int64(data.count)
+                if total == nil {
+                    total = ByteRange.total(contentRange: http.value(forHTTPHeaderField: "Content-Range"))
+                }
+                // Without a total, a short chunk is the last one.
+                if total == nil && Int64(data.count) < chunkSize { break }
+                report(total.map { Double(offset) / Double($0) } ?? 0)
+            }
+        } catch {
+            try? handle.close()
+            closed = true
+            try? FileManager.default.removeItem(at: output)
+            throw error
+        }
+        return output
+    }
+
+    /// Mobile connections drop; retry a chunk a few times before failing the download.
+    nonisolated private static func withRetries<T>(
+        _ attempt: () async throws -> T
+    ) async throws -> T {
+        var tries = 0
+        while true {
+            do {
+                return try await attempt()
+            } catch let error as URLError where error.code != .cancelled && tries < 4 {
+                tries += 1
+                NSLog("[download] retrying after %@", error.localizedDescription)
+                try await Task.sleep(nanoseconds: UInt64(tries) * 1_500_000_000)
+            }
+        }
     }
 
     /// URLSession calls this once, before any progress can be reported.

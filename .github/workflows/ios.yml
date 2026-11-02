@@ -69,6 +69,21 @@ jobs:
           echo "Testing $ccc and $peertube"
           capture mediaccc "$ccc" -testDislikeVideoID aqz-KE-bpKQ
           capture peertube "$peertube"
+          # Full screen must turn landscape although the simulator is held upright.
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$peertube" -testFullscreen YES
+          sleep 30
+          xcrun simctl io "$device" screenshot fullscreen.png
+          # The popup player (Picture in Picture), started from the menu's "Play in popup".
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testPopup "$peertube"
+          sleep 30
+          xcrun simctl io "$device" screenshot popup.png
+          # A download, fetched in ranges.
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testDownload "$ccc"
+          sleep 60
+          xcrun simctl io "$device" screenshot download.png
           # The CAPTCHA banner, then the challenge page opened in the web view.
           sorry='https://www.google.com/sorry/index?continue=https://www.youtube.com/'
           xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
@@ -86,8 +101,8 @@ jobs:
           xcrun simctl launch "$device" com.apple.Preferences
           sleep 60
           xcrun simctl io "$device" screenshot background.png
-          xcrun simctl spawn "$device" log show --last 6m --style compact \
-            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]" OR eventMessage CONTAINS "[dislikes]" OR eventMessage CONTAINS "[captcha]"' > player.log || true
+          xcrun simctl spawn "$device" log show --last 12m --style compact \
+            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]" OR eventMessage CONTAINS "[dislikes]" OR eventMessage CONTAINS "[captcha]" OR eventMessage CONTAINS "[download]"' > player.log || true
           cat player.log
       - uses: actions/upload-artifact@v4
         if: always()

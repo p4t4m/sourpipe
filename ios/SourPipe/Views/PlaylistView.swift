@@ -4,7 +4,6 @@ struct PlaylistView: View {
     let serviceId: Int
     let url: String
     let name: String
-    @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var store: AppStore
     @StateObject private var model = ItemListModel()
     @State private var playlist: PlaylistDetails?
@@ -20,20 +19,7 @@ struct PlaylistView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                HStack {
-                    Button {
-                        player.play(model.items, startingAt: 0)
-                    } label: {
-                        Label("Play all", systemImage: "play.fill")
-                    }
-                    Button {
-                        player.play(model.items.shuffled(), startingAt: 0)
-                    } label: {
-                        Label("Shuffle", systemImage: "shuffle")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .listRowSeparator(.hidden)
+                PlayAllButtons(items: model.items)
             }
             if let error {
                 StatusView(title: "Could not load this playlist", message: error) {

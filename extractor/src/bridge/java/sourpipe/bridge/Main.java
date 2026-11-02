@@ -78,6 +78,8 @@ public final class Main {
         }).start());
     }
 
+    private static final String REMOVED_YOUTUBE_KIOSK = "Trending";
+
     private static String describe(final Throwable t) {
         final JsonObject o = new JsonObject();
         final String kind;
@@ -176,8 +178,17 @@ public final class Main {
             }
             o.put("capabilities", capabilities);
             final KioskList kiosks = s.getKioskList();
-            o.put("kiosks", new JsonArray(new ArrayList<>(kiosks.getAvailableKiosks())));
-            o.put("defaultKiosk", kiosks.getDefaultKioskId());
+            final List<String> available = new ArrayList<>(kiosks.getAvailableKiosks());
+            String defaultKiosk = kiosks.getDefaultKioskId();
+            if (s.getServiceId() == 0) {
+                // YouTube removed its Trending page; the kiosk only fails now.
+                available.remove(REMOVED_YOUTUBE_KIOSK);
+                if (REMOVED_YOUTUBE_KIOSK.equals(defaultKiosk) && !available.isEmpty()) {
+                    defaultKiosk = available.get(0);
+                }
+            }
+            o.put("kiosks", new JsonArray(available));
+            o.put("defaultKiosk", defaultKiosk);
             o.put("searchFilters", new JsonArray(
                     java.util.Arrays.asList(s.getSearchQHFactory().getAvailableContentFilter())));
             list.add(o);

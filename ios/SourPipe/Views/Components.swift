@@ -69,10 +69,10 @@ struct ItemRow: View {
     }
 }
 
-/// A row that opens the item, with queue and playlist actions in its context menu.
+/// A row that opens the item, with NewPipe's long-press actions in its context menu.
 struct LinkedItemRow: View {
     let item: InfoItem
-    @EnvironmentObject private var player: PlayerController
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         if let route = Route(item) {
@@ -81,18 +81,17 @@ struct LinkedItemRow: View {
             }
             .contextMenu {
                 if item.type == .stream {
-                    Button { player.play(item) } label: {
-                        Label("Play", systemImage: "play")
+                    StreamItemMenu(item: item)
+                } else {
+                    ShareLink(item: item.url) {
+                        Label("Share", systemImage: "square.and.arrow.up")
                     }
-                    Button { player.enqueueNext(item) } label: {
-                        Label("Play next", systemImage: "text.insert")
+                    if let url = URL(string: item.url) {
+                        Button { openURL(url) } label: {
+                            Label("Open in browser", systemImage: "safari")
+                        }
                     }
-                    Button { player.enqueue(item) } label: {
-                        Label("Add to queue", systemImage: "text.append")
-                    }
-                    AddToPlaylistMenu(item: item)
                 }
-                ShareLink(item: item.url)
             }
         }
     }

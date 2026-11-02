@@ -184,12 +184,7 @@ struct FeedView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    player.play(visibleItems, startingAt: 0)
-                } label: {
-                    Label("Play all", systemImage: "play")
-                }
-                .disabled(visibleItems.isEmpty)
+                PlayAllMenu(items: visibleItems)
             }
         }
         .refreshable {

@@ -76,20 +76,7 @@ struct LocalPlaylistView: View {
     var body: some View {
         List {
             if !items.isEmpty {
-                HStack {
-                    Button {
-                        player.play(items, startingAt: 0)
-                    } label: {
-                        Label("Play all", systemImage: "play.fill")
-                    }
-                    Button {
-                        player.play(items.shuffled(), startingAt: 0)
-                    } label: {
-                        Label("Shuffle", systemImage: "shuffle")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .listRowSeparator(.hidden)
+                PlayAllButtons(items: items)
             }
             ForEach(items) { LinkedItemRow(item: $0) }
                 .onDelete { offsets in

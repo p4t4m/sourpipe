@@ -298,6 +298,16 @@ struct StreamDetailsSection: View {
                     Label(player.isAudioOnly ? "Show video" : "Audio only",
                           systemImage: player.isAudioOnly ? "film" : "headphones")
                 }
+                Button {
+                    if isCurrent {
+                        player.setAudioOnly(false)
+                        player.popupRequested = true
+                    } else {
+                        player.play(details.asItem, mode: .popup)
+                    }
+                } label: {
+                    Label("Popup", systemImage: "pip.enter")
+                }
                 Menu {
                     Picker("Maximum quality", selection: Binding(
                         get: { store.library.settings.maxHeight },

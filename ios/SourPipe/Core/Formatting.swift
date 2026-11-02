@@ -69,3 +69,12 @@ public enum Format {
             .capitalized
     }
 }
+
+public enum ByteRange {
+    /// The full size from a `Content-Range: bytes 0-99/1234` header, or nil when unknown (`*`).
+    public static func total(contentRange: String?) -> Int64? {
+        guard let contentRange, let slash = contentRange.lastIndex(of: "/") else { return nil }
+        return Int64(contentRange[contentRange.index(after: slash)...]
+            .trimmingCharacters(in: .whitespaces))
+    }
+}

@@ -156,8 +156,7 @@ cannot play YouTube, which refuses data-center addresses with a "not a bot" erro
 
 ## Known behaviour
 
-YouTube's `Trending` kiosk currently fails with `Could not get Trending name`. The other YouTube
-sections work, and the default is `live`.
+YouTube's `Trending` section is hidden: YouTube removed that page, so the extractor can only fail on it.
 
 YouTube's bot check can also affect home connections and VPNs. The app reports it and does not try to
 get around it. NewPipeExtractor's `PoTokenProvider` hook is not implemented here, so if YouTube starts
