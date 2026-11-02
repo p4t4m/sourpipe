@@ -25,9 +25,12 @@ struct SettingsView: View {
                 Picker("Language", selection: $store.library.settings.language) {
                     ForEach(languageOptions, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                TextField("Country code", text: $store.library.settings.country)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
+                LabeledContent("Country") {
+                    TextField("Code, such as US", text: $store.library.settings.country)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                }
                 Toggle("Show comments", isOn: $store.library.settings.showComments)
                 Toggle("Hide Shorts", isOn: $store.library.settings.hideShorts)
             }
