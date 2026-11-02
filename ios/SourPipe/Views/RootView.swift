@@ -124,6 +124,12 @@ struct RootView: View {
                let url = URL(string: page) {
                 CaptchaSolver.shared.request(url)
             }
+            // `-testPlayDownload YES` opens the newest download in the player.
+            if UserDefaults.standard.bool(forKey: "testPlayDownload"),
+               let record = store.library.downloads.first {
+                player.playDownload(record)
+                showingPlayer = true
+            }
             // `-testPopup <url>` plays in the popup; `-testDownload <url>` saves an audio track.
             if let link = UserDefaults.standard.string(forKey: "testPopup"),
                case .stream(let item)? = try? await LinkResolver.route(for: link) {

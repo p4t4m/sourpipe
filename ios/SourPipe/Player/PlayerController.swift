@@ -45,6 +45,22 @@ final class PlayerController: ObservableObject {
 
     /// Set when playback should move into Picture in Picture; PopupHost starts it and clears it.
     @Published var popupRequested = false
+    /// Set to ask PopupHost to end the popup, so that only one player shows the video.
+    @Published var popupCloseRequested = false
+    /// Playing in the popup now. The video page shows a placeholder instead of a second copy.
+    @Published private(set) var isInPopup = false
+
+    func popupDidChange(_ active: Bool) {
+        isInPopup = active
+        isInPictureInPicture = active
+    }
+
+    /// NewPipe moves a video back from the popup when the main player opens; so does this.
+    func closePopup() {
+        if isInPopup { popupCloseRequested = true }
+    }
+
+    var isPlayingDownload: Bool { current?.localFile != nil }
 
     let player = AVPlayer()
     var isInPictureInPicture = false {
@@ -109,6 +125,8 @@ final class PlayerController: ObservableObject {
 
     func playDownload(_ record: DownloadRecord) {
         let file = AppStore.documents.appendingPathComponent(record.fileName)
+        // An audio file gets the artwork and the app's own controls.
+        isAudioOnly = record.isAudio
         setQueue([QueueEntry(item: record.item, localFile: file)], start: 0)
     }
 

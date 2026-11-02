@@ -74,16 +74,16 @@ jobs:
           xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$peertube" -testFullscreen YES
           sleep 30
           xcrun simctl io "$device" screenshot fullscreen.png
-          # The popup player (Picture in Picture), started from the menu's "Play in popup".
-          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
-          xcrun simctl launch "$device" app.sourpipe.SourPipe -testPopup "$peertube"
-          sleep 30
-          xcrun simctl io "$device" screenshot popup.png
           # A download, fetched in ranges.
           xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
           xcrun simctl launch "$device" app.sourpipe.SourPipe -testDownload "$ccc"
           sleep 60
           xcrun simctl io "$device" screenshot download.png
+          # The saved file's page: no spinner, no fetching, a "Playing from download" notice.
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testPlayDownload YES
+          sleep 15
+          xcrun simctl io "$device" screenshot download-playing.png
           # The CAPTCHA banner, then the challenge page opened in the web view.
           sorry='https://www.google.com/sorry/index?continue=https://www.youtube.com/'
           xcrun simctl terminate "$device" app.sourpipe.SourPipe || true

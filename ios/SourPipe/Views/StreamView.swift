@@ -12,6 +12,8 @@ struct StreamView: View {
     @State private var started = false
 
     private var isCurrent: Bool { player.isCurrent(url: item.url) }
+    /// A downloaded file plays offline, so the page shows what was saved and fetches nothing.
+    private var isDownload: Bool { isCurrent && player.isPlayingDownload }
 
     /// The player area shows this failure, so the list below must not keep spinning.
     private var hasFailed: Bool {
@@ -29,7 +31,9 @@ struct StreamView: View {
         VStack(spacing: 0) {
             playerArea
             List {
-                if let details {
+                if isDownload, let entry = player.current {
+                    DownloadedDetailsSection(item: entry.item)
+                } else if let details {
                     StreamDetailsSection(details: details)
                 } else if let error, !isCurrent {
                     StatusView(title: "Could not load this stream", message: error) {
@@ -53,7 +57,7 @@ struct StreamView: View {
             if isCurrent { return }
             if autoplay {
                 player.play(item)
-            } else {
+            } else if !isDownload {
                 await load()
             }
         }
@@ -86,7 +90,16 @@ struct StreamView: View {
                 case .idle:
                     EmptyView()
                 case .loading, .ready:
-                    if player.isAudioOnly {
+                    if player.isInPopup {
+                        Thumbnail(url: artworkURL).opacity(0.4)
+                        VStack(spacing: 8) {
+                            Label("Playing in popup", systemImage: "pip")
+                                .foregroundColor(.white)
+                            Button("Show here") { player.closePopup() }
+                                .buttonStyle(.bordered)
+                                .tint(.white)
+                        }
+                    } else if player.isAudioOnly {
                         Thumbnail(url: artworkURL).opacity(0.5)
                         audioControls
                     } else {
@@ -112,6 +125,8 @@ struct StreamView: View {
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .frame(maxWidth: .infinity)
+        // Opening the main player takes the video back from the popup.
+        .onAppear { if isCurrent { player.closePopup() } }
         .overlay(alignment: .topTrailing) {
             if isCurrent { SkipBanner() }
         }
@@ -411,6 +426,27 @@ struct QueueSection: View {
 }
 
 /// The page behind the mini player.
+/// The page for a downloaded file: what was saved with it, and no network.
+struct DownloadedDetailsSection: View {
+    let item: InfoItem
+    @EnvironmentObject private var player: PlayerController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.name).font(.headline)
+            let subtitle = Format.subtitle(for: item)
+            if !subtitle.isEmpty {
+                Text(subtitle).font(.caption).foregroundColor(.secondary)
+            }
+        }
+        Label("Playing from download", systemImage: "arrow.down.circle.fill")
+            .font(.footnote)
+            .foregroundColor(.secondary)
+            .listRowSeparator(.hidden)
+        if player.queue.count > 1 { QueueSection() }
+    }
+}
+
 struct NowPlayingScreen: View {
     @EnvironmentObject private var player: PlayerController
 

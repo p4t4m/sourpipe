@@ -44,6 +44,7 @@ struct PopupHost: UIViewRepresentable {
         private var active = false
 
         private var request: AnyCancellable?
+        private var closeRequest: AnyCancellable?
 
         func setUp(_ view: PlayerLayerView) {
             self.view = view
@@ -52,6 +53,13 @@ struct PopupHost: UIViewRepresentable {
                 .filter { $0 }
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in self?.start() }
+            closeRequest = controller?.$popupCloseRequested
+                .filter { $0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.controller?.popupCloseRequested = false
+                    self?.pip?.stopPictureInPicture()
+                }
             guard AVPictureInPictureController.isPictureInPictureSupported() else {
                 NSLog("[player] popup: Picture in Picture is not supported here")
                 return
@@ -109,7 +117,7 @@ struct PopupHost: UIViewRepresentable {
         ) {
             Task { @MainActor in
                 self.active = true
-                self.controller?.isInPictureInPicture = true
+                self.controller?.popupDidChange(true)
             }
         }
 
@@ -129,7 +137,7 @@ struct PopupHost: UIViewRepresentable {
         ) {
             Task { @MainActor in
                 self.active = false
-                self.controller?.isInPictureInPicture = false
+                self.controller?.popupDidChange(false)
                 self.release()
             }
         }
