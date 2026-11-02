@@ -8,7 +8,8 @@
   NewPipe for iOS: YouTube, SoundCloud, PeerTube, Bandcamp and media.ccc.de with no account, ads or tracking.
 </p>
 
-SourPipe is a native SwiftUI port of [NewPipe](https://github.com/TeamNewPipe/NewPipe). It runs the
+SourPipe is a native SwiftUI port of [NewPipe](https://github.com/TeamNewPipe/NewPipe), vibe-ported
+by [Claude](https://claude.ai), Anthropic's AI model. It runs the
 real [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor), compiled for iOS, so fixes
 made upstream reach the app by updating one pinned commit.
 
