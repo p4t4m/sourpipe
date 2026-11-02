@@ -31,13 +31,18 @@ enum MediaMerge {
     }
 
     /// One file as an asset: unchanged if ordinary, cut to its real length if fragmented.
-    static func asset(for url: URL) async -> AVAsset {
+    static func asset(for url: URL, expected: Double? = nil) async -> AVAsset {
         let plain = AVURLAsset(url: url)
-        guard await indexedLength(of: url) != nil else { return plain }
+        if await indexedLength(of: url) == nil {
+            // No index read (a failed request, say): still cap a length that is clearly doubled.
+            guard let expected, expected > 0,
+                  let declared = try? await plain.load(.duration).seconds,
+                  declared > expected * 1.5 else { return plain }
+        }
         let hasVideo = !((try? await plain.loadTracks(withMediaType: .video)) ?? []).isEmpty
         let hasAudio = !((try? await plain.loadTracks(withMediaType: .audio)) ?? []).isEmpty
-        return (try? await composition(video: hasVideo ? url : nil, audio: hasAudio ? url : nil))
-            ?? plain
+        return (try? await composition(video: hasVideo ? url : nil, audio: hasAudio ? url : nil,
+                                       expected: expected)) ?? plain
     }
 
     /// The indexed length if the file is fragmented, or nil for an ordinary file.

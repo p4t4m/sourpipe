@@ -45,11 +45,24 @@ need your Apple ID credentials.
 
 - Browse, search with filters and suggestions, or paste a link (also `sourpipe://open?url=<link>`).
 - Video pages with description, chapters, comments and replies, and related videos.
-- Channels with their tabs, and playlists with Play all and Shuffle.
+- Channels with their tabs, and playlists, albums, channels and the feed with NewPipe's Play all,
+  Background and Popup buttons (and Shuffle).
+- NewPipe's three players: the main one, Background (audio only) and Popup, which on iOS is Picture in
+  Picture. Opening the main player takes the video back from the popup.
+- NewPipe's long-press menu on videos: play in background or popup, queue, download, add to playlist,
+  share, open in browser, mark as watched, show channel. Settings > Long-press menu reorders and hides
+  entries.
+- Home sections, like NewPipe's "Content of main page": any mix of service sections, a single section
+  of any service, What's new, subscriptions, bookmarks, history, a channel or a playlist, as tabs
+  across the top. Set in Settings > Home sections.
+- A theme colour and light or dark mode, in Settings > Appearance.
 - Playback through AVPlayer: adaptive quality, a maximum quality setting, audio-only mode, background
-  audio, lock-screen controls, Picture in Picture, AirPlay, a queue and resume.
+  audio, lock-screen controls, Picture in Picture, AirPlay, a queue and resume. Full screen is always
+  landscape on iPhone, even with rotation lock on.
 - Stored on the device: subscriptions with a feed, history, local playlists and downloads (also
   visible in the Files app).
+  Downloads are fetched in 8 MB ranges, as NewPipe does, because YouTube trickles whole-file requests;
+  a downloaded video plays offline without loading anything.
 - Imports a full NewPipe backup, including from Tubular and PipePipe: subscriptions, history with resume
   positions and play counts, playlists, bookmarked playlists, feed groups and searches. Export it on
   Android from Settings > Backup and restore, then use Settings > Import NewPipe backup. Nothing already
@@ -155,6 +168,10 @@ CI also launches the app in a simulator and plays a media.ccc.de file and a Peer
 cannot play YouTube, which refuses data-center addresses with a "not a bot" error.
 
 ## Known behaviour
+
+YouTube's DASH files are fragmented MP4s, which AVFoundation reads as twice their real length. The
+player and downloads take the length from each file's segment index instead; downloads saved by an
+earlier version may still show the doubled length and are worth downloading again.
 
 YouTube's `Trending` section is hidden: YouTube removed that page, so the extractor can only fail on it.
 

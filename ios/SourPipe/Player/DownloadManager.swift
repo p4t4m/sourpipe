@@ -52,7 +52,7 @@ final class DownloadManager: ObservableObject {
         }.prefix(80))
         let base = "\(safeName) \(id.uuidString.prefix(8))"
         let isAudio = source.label.hasPrefix("Audio")
-        let fileName = base + (isAudio ? ".m4a" : ".mp4")
+        let fileName = base + "." + Self.fileExtension(for: source, isAudio: isAudio)
         let destination = Self.folder.appendingPathComponent(fileName)
         do {
             switch source {
@@ -64,7 +64,7 @@ final class DownloadManager: ObservableObject {
                     // Fragmented: rewrite as an ordinary file, or players show double the length.
                     defer { try? FileManager.default.removeItem(at: file) }
                     update(id) { $0.phase = "Finishing" }
-                    try await Self.export(MediaMerge.asset(for: file), to: destination,
+                    try await Self.export(MediaMerge.asset(for: file, expected: Double(details.duration)), to: destination,
                                           type: isAudio ? .m4a : .mp4)
                 } else {
                     try FileManager.default.moveItem(at: file, to: destination)
@@ -207,6 +207,17 @@ final class DownloadManager: ObservableObject {
                 report(progress.fractionCompleted)
             }
         }
+    }
+
+    /// The saved file's name must match its format: iOS will not play an MP3 named .m4a.
+    nonisolated private static func fileExtension(for source: PlaybackSource, isAudio: Bool) -> String {
+        if case .file(let url, let label) = source {
+            let known = ["mp3", "m4a", "mp4", "m4v", "mov", "aac"]
+            let fromURL = url.pathExtension.lowercased()
+            if known.contains(fromURL) { return fromURL }
+            if label.lowercased().contains("mp3") { return "mp3" }
+        }
+        return isAudio ? "m4a" : "mp4"
     }
 
     nonisolated private static func export(_ asset: AVAsset, to destination: URL,

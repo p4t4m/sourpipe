@@ -320,8 +320,10 @@ final class PlayerController: ObservableObject {
         case .hls(let url):
             attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds_)
         case .file(let url, _):
+            let duration = details.map { Double($0.duration) }
+                ?? current.flatMap { $0.item.duration.map(Double.init) }
             loadTask = Task { [weak self] in
-                let asset = await MediaMerge.asset(for: url)
+                let asset = await MediaMerge.asset(for: url, expected: duration)
                 guard let self, !Task.isCancelled, self.current?.id == expected else { return }
                 self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
             }

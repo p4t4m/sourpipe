@@ -7,6 +7,7 @@ struct StreamView: View {
     var autoplay = true
 
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var store: AppStore
     @State private var loaded: StreamDetails?
     @State private var error: String?
     @State private var started = false
@@ -82,7 +83,16 @@ struct StreamView: View {
                             .font(.footnote)
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
-                        Button("Try again") { player.play(item) }
+                        Button("Try again") {
+                            if isDownload,
+                               let record = store.library.downloads.first(where: {
+                                   $0.item.url == item.url
+                               }) {
+                                player.playDownload(record)
+                            } else {
+                                player.play(item)
+                            }
+                        }
                             .buttonStyle(.bordered)
                             .tint(.white)
                     }
