@@ -84,6 +84,11 @@ jobs:
           xcrun simctl launch "$device" app.sourpipe.SourPipe -testPlayDownload YES
           sleep 15
           xcrun simctl io "$device" screenshot download-playing.png
+          # Home with several sections: the tab row is the list's first row.
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testHomeTabs YES
+          sleep 20
+          xcrun simctl io "$device" screenshot home-tabs.png
           # The CAPTCHA banner, then the challenge page opened in the web view.
           sorry='https://www.google.com/sorry/index?continue=https://www.youtube.com/'
           xcrun simctl terminate "$device" app.sourpipe.SourPipe || true

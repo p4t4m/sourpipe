@@ -125,6 +125,10 @@ struct RootView: View {
                let url = URL(string: page) {
                 CaptchaSolver.shared.request(url)
             }
+            // `-testHomeTabs YES` gives Home several sections, to show its tab row.
+            if UserDefaults.standard.bool(forKey: "testHomeTabs") {
+                store.library.settings.homePages = [.serviceSections, .history, .bookmarks]
+            }
             // `-testPlayDownload YES` opens the newest download in the player.
             if UserDefaults.standard.bool(forKey: "testPlayDownload"),
                let record = store.library.downloads.first {
