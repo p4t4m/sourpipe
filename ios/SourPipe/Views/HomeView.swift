@@ -34,38 +34,12 @@ struct HomeView: View {
     var body: some View {
         page(current)
             .id(current)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if pages.count > 1 { tabs }
-            }
-    }
-
-    private var tabs: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(pages) { page in
-                        let selected = page == current
-                        Button {
-                            selection = page
-                        } label: {
-                            Text(store.title(of: page))
-                                .font(.footnote.weight(selected ? .semibold : .regular))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(selected ? Color.accentColor.opacity(0.2)
-                                                     : Color.secondary.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .id(page)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
-            }
-            .background(.bar)
-            .onChange(of: current) { page in withAnimation { proxy.scrollTo(page) } }
-        }
+            // The tabs are the first row of each section's list, so they scroll with the title.
+            .environment(\.homeTabs, pages.count > 1 ? HomeTabs(
+                pages: pages, current: current,
+                titles: Dictionary(pages.map { ($0, store.title(of: $0)) },
+                                   uniquingKeysWith: { first, _ in first }),
+                select: { selection = $0 }) : nil)
     }
 
     @ViewBuilder private func page(_ page: HomePage) -> some View {
@@ -126,6 +100,7 @@ struct KioskPage: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if fixed == nil, let kiosks = service?.kiosks, kiosks.count > 1 {
                 Picker("Section", selection: Binding(
                     get: { selectedKiosk ?? "" },
@@ -169,6 +144,7 @@ struct BookmarksView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             ForEach(store.library.savedPlaylists) { LinkedItemRow(item: $0) }
                 .onDelete { store.library.savedPlaylists.remove(atOffsets: $0) }
         }
@@ -178,6 +154,58 @@ struct BookmarksView: View {
             if store.library.savedPlaylists.isEmpty {
                 Text("No bookmarked playlists").foregroundColor(.secondary)
             }
+        }
+    }
+}
+
+struct HomeTabs {
+    let pages: [HomePage]
+    let current: HomePage
+    let titles: [HomePage: String]
+    let select: (HomePage) -> Void
+}
+
+private struct HomeTabsKey: EnvironmentKey {
+    static let defaultValue: HomeTabs? = nil
+}
+
+extension EnvironmentValues {
+    var homeTabs: HomeTabs? {
+        get { self[HomeTabsKey.self] }
+        set { self[HomeTabsKey.self] = newValue }
+    }
+}
+
+/// Home's section tabs, shown as a list's first row when the list is on Home; empty elsewhere.
+struct HomeTabsSlot: View {
+    @Environment(\.homeTabs) private var tabs
+
+    var body: some View {
+        if let tabs {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tabs.pages) { page in
+                        let selected = page == tabs.current
+                        Button {
+                            tabs.select(page)
+                        } label: {
+                            Text(tabs.titles[page] ?? "")
+                                .font(.footnote.weight(selected ? .semibold : .regular))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selected ? Color.accentColor.opacity(0.2)
+                                                     : Color.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
     }
 }

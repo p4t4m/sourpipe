@@ -12,6 +12,7 @@ struct ChannelView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if let channel {
                 header(channel)
                 if channel.tabs.count > 1 {

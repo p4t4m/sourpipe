@@ -115,6 +115,7 @@ struct HistoryView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             ForEach(store.library.history) { entry in
                 VStack(alignment: .leading, spacing: 2) {
                     LinkedItemRow(item: entry.item)

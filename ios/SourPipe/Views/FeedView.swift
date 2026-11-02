@@ -142,6 +142,7 @@ struct FeedView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if store.library.subscriptions.isEmpty {
                 VStack(spacing: 8) {
                     Text("No subscriptions yet").font(.headline)
@@ -200,6 +201,7 @@ struct SubscriptionsView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             ForEach(store.library.subscriptions) { subscription in
                 NavigationLink(value: Route.channel(serviceId: subscription.serviceId,
                                                     url: subscription.url,

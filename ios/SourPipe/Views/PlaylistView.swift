@@ -11,6 +11,7 @@ struct PlaylistView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if let playlist {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(playlist.name).font(.headline)
