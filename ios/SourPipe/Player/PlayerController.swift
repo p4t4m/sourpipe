@@ -314,44 +314,32 @@ final class PlayerController: ObservableObject {
         }
         sourceLabel = source.label
         clearItemObservers()
+        let expected = current?.id
+        let seconds_ = seconds
         switch source {
-        case .hls(let url), .file(let url, _):
-            attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds)
+        case .hls(let url):
+            attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds_)
+        case .file(let url, _):
+            loadTask = Task { [weak self] in
+                let asset = await MediaMerge.asset(for: url)
+                guard let self, !Task.isCancelled, self.current?.id == expected else { return }
+                self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
+            }
         case .merged(let video, let audio, _):
-            let expected = current?.id
+            let duration = details?.duration.map(Double.init)
             loadTask = Task { [weak self] in
                 do {
-                    let asset = try await Self.mergedAsset(video: video, audio: audio)
+                    let asset = try await MediaMerge.composition(video: video, audio: audio,
+                                                                 expected: duration)
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
-                    self.attach(AVPlayerItem(asset: asset), resumeAt: seconds)
+                    self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
                 } catch {
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
                     NSLog("[player] merge failed: %@", error.localizedDescription)
-                    self.tryNextSource(resumeAt: seconds)
+                    self.tryNextSource(resumeAt: seconds_)
                 }
             }
         }
-    }
-
-    nonisolated private static func mergedAsset(video: URL, audio: URL) async throws -> AVMutableComposition {
-        let composition = AVMutableComposition()
-        let videoAsset = AVURLAsset(url: video)
-        let audioAsset = AVURLAsset(url: audio)
-        guard let videoTrack = try await videoAsset.loadTracks(withMediaType: .video).first,
-              let audioTrack = try await audioAsset.loadTracks(withMediaType: .audio).first else {
-            throw ExtractorFailure(kind: "unsupported", message: "Stream has no usable track")
-        }
-        let length = try await videoAsset.load(.duration)
-        let range = CMTimeRange(start: .zero, duration: length)
-        let audioRange = CMTimeRange(start: .zero,
-                                     duration: min(length, try await audioAsset.load(.duration)))
-        try composition.addMutableTrack(withMediaType: .video,
-                                        preferredTrackID: kCMPersistentTrackID_Invalid)?
-            .insertTimeRange(range, of: videoTrack, at: .zero)
-        try composition.addMutableTrack(withMediaType: .audio,
-                                        preferredTrackID: kCMPersistentTrackID_Invalid)?
-            .insertTimeRange(audioRange, of: audioTrack, at: .zero)
-        return composition
     }
 
     private func attach(_ item: AVPlayerItem, resumeAt seconds: Double) {

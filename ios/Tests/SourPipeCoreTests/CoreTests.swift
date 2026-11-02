@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 import XCTest
 @testable import SourPipeCore
 
@@ -484,4 +487,51 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(ByteRange.total(contentRange: "bytes 0-99/*"))
         XCTAssertNil(ByteRange.total(contentRange: nil))
     }
+
+    func testFragmentedMp4LengthComesFromItsIndex() throws {
+        // The first 4 KB of real YouTube DASH files (itag 134 video, 140 audio) of a 635 s video.
+        func head(_ name: String) throws -> Data {
+            try Data(contentsOf: XCTUnwrap(Bundle.module.url(forResource: name,
+                withExtension: "mp4", subdirectory: "Fixtures")))
+        }
+        let video = try XCTUnwrap(MP4Index.duration(of: head("youtube-134-head")))
+        let audio = try XCTUnwrap(MP4Index.duration(of: head("youtube-140-head")))
+        XCTAssertEqual(video, 634.57, accuracy: 0.01)
+        XCTAssertEqual(audio, 634.62, accuracy: 0.01)
+        XCTAssertNil(MP4Index.duration(of: Data("not an mp4 at all".utf8)))
+        XCTAssertNil(MP4Index.duration(of: try head("youtube-134-head").prefix(100)))
+    }
+
+    #if canImport(AVFoundation)
+    /// What MediaMerge does in the app, on real AVFoundation: a YouTube-style fragmented file
+    /// whose header states its length must save at that length, not twice it.
+    func testFragmentedFileSavesAtItsRealLength() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "youtube-140-fragmented",
+                                                  withExtension: "m4a", subdirectory: "Fixtures"))
+        let indexed = try XCTUnwrap(MP4Index.duration(of: Data(contentsOf: url)))
+        XCTAssertEqual(indexed, 29.95, accuracy: 0.01)
+        let asset = AVURLAsset(url: url)
+        let declared = try await asset.load(.duration).seconds
+        print("fragmented fixture: AVFoundation says \(declared)s, index says \(indexed)s")
+        let track = try await XCTUnwrap(asset.loadTracks(withMediaType: .audio).first)
+        let composition = AVMutableComposition()
+        let length = min(CMTime(seconds: declared, preferredTimescale: 600),
+                         CMTime(seconds: indexed, preferredTimescale: 600))
+        try composition.addMutableTrack(withMediaType: .audio,
+                                        preferredTrackID: kCMPersistentTrackID_Invalid)?
+            .insertTimeRange(CMTimeRange(start: .zero, duration: length), of: track, at: .zero)
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".m4a")
+        defer { try? FileManager.default.removeItem(at: output) }
+        let export = try XCTUnwrap(AVAssetExportSession(asset: composition,
+                                                        presetName: AVAssetExportPresetPassthrough))
+        export.outputURL = output
+        export.outputFileType = .m4a
+        await export.export()
+        XCTAssertNil(export.error)
+        let saved = try await AVURLAsset(url: output).load(.duration).seconds
+        print("saved: \(saved)s")
+        XCTAssertEqual(saved, indexed, accuracy: 0.2)
+    }
+    #endif
 }
