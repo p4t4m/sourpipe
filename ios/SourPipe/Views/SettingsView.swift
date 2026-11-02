@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var player: PlayerController
     @State private var importing = false
     @State private var importMessage: String?
+    @State private var isImporting = false
 
     private static let languages = [
         ("en", "English"), ("de", "Deutsch"), ("es", "Español"), ("fr", "Français"),
@@ -49,7 +50,44 @@ struct SettingsView: View {
             }
             Section("Library") {
                 Toggle("Keep watch history", isOn: $store.library.settings.recordHistory)
-                Button("Import NewPipe subscriptions") { importing = true }
+                Button(isImporting ? "Importing…" : "Import NewPipe backup") { importing = true }
+                    .disabled(isImporting)
+            }
+            Section {
+                Toggle("SponsorBlock", isOn: $store.library.settings.sponsorBlockEnabled)
+                if store.library.settings.sponsorBlockEnabled {
+                    ForEach(SponsorCategory.allCases) { category in
+                        Picker(category.title, selection: Binding(
+                            get: { store.library.settings.sponsorBlock.mode(for: category) },
+                            set: { store.library.settings.sponsorBlock.modes[category.rawValue] = $0 }
+                        )) {
+                            Text("Off").tag(SkipMode.off)
+                            Text(category == .highlight ? "Show" : "Ask").tag(SkipMode.offer)
+                            if category != .highlight { Text("Skip").tag(SkipMode.automatic) }
+                        }
+                    }
+                    TextField("Server", text: $store.library.settings.sponsorBlock.server)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote)
+                }
+            } header: {
+                Text("Skip segments")
+            } footer: {
+                Text("YouTube only. Uses community-submitted segments from sponsor.ajay.app. The server receives the first characters of a hash of the video ID, and your IP address.")
+            }
+            Section {
+                Toggle("Return YouTube Dislike", isOn: $store.library.settings.dislikesEnabled)
+                if store.library.settings.dislikesEnabled {
+                    TextField("Server", text: $store.library.settings.dislikesServer)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote)
+                }
+            } header: {
+                Text("Dislike counts")
+            } footer: {
+                Text("YouTube only. The counts are estimates. The server receives the ID of each video you open, and your IP address.")
             }
             Section("About") {
                 LabeledContent("Extractor", value: ExtractorVersion.commit)
@@ -60,8 +98,12 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .onChange(of: store.library.settings.language) { _ in store.applyLocalization() }
         .onChange(of: store.library.settings.country) { _ in store.applyLocalization() }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
-            importMessage = importSubscriptions(result)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.zip, .json, .data]) { result in
+            isImporting = true
+            Task {
+                importMessage = await importBackup(result)
+                isImporting = false
+            }
         }
         .alert("Import", isPresented: Binding(
             get: { importMessage != nil }, set: { if !$0 { importMessage = nil } }
@@ -79,14 +121,22 @@ struct SettingsView: View {
             ? Self.languages : Self.languages + [(current, current)]
     }
 
-    private func importSubscriptions(_ result: Result<URL, Error>) -> String {
+    /// Reads a NewPipe, Tubular or PipePipe backup, or a NewPipe subscriptions export.
+    private func importBackup(_ result: Result<URL, Error>) async -> String {
         do {
             let url = try result.get()
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let incoming = try NewPipeImport.subscriptions(from: Data(contentsOf: url))
-            let added = NewPipeImport.merge(incoming, into: &store.library)
-            return "Added \(added) of \(incoming.count) subscriptions."
+            let data = try Data(contentsOf: url)
+            if data.first == UInt8(ascii: "{") {
+                let incoming = try NewPipeImport.subscriptions(from: data)
+                let added = NewPipeImport.merge(incoming, into: &store.library)
+                return "Added \(added) of \(incoming.count) subscriptions."
+            }
+            let backup = try await Task.detached(priority: .userInitiated) {
+                try NewPipeBackupReader.read(data)
+            }.value
+            return store.library.merge(backup).description
         } catch {
             return "That file could not be read: \(error.localizedDescription)"
         }

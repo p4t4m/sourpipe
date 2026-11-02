@@ -28,6 +28,12 @@ final class AppStore: ObservableObject {
            let loaded = try? JSONDecoder().decode(LibraryData.self, from: data) {
             library = loaded
         } else {
+            // A file that exists but cannot be read must survive the next save.
+            if FileManager.default.fileExists(atPath: Self.fileURL.path) {
+                let keep = Self.fileURL.deletingLastPathComponent()
+                    .appendingPathComponent("library-unreadable-\(UUID().uuidString).json")
+                try? FileManager.default.moveItem(at: Self.fileURL, to: keep)
+            }
             var fresh = LibraryData()
             if let language = Locale.current.languageCode { fresh.settings.language = language }
             if let region = Locale.current.regionCode { fresh.settings.country = region }

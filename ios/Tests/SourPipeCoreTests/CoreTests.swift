@@ -106,6 +106,193 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Format.date("3 days ago"), "3 days ago")
     }
 
+    // MARK: Library file compatibility
+
+    func testLibraryFromTheFirstReleaseKeepsItsDataAndGainsDefaults() throws {
+        let old = #"""
+        {"settings":{"serviceId":3,"language":"de","country":"DE","maxHeight":720,"audioOnly":true,
+         "autoplayRelated":false,"resumePlayback":true,"recordHistory":true,"showComments":true,
+         "hideShorts":false},
+         "subscriptions":[{"serviceId":0,"url":"u","name":"N"}],
+         "history":[{"item":{"type":"stream","serviceId":0,"url":"h","name":"H","thumbnails":[]},
+                     "watchedAt":0,"position":12}]}
+        """#.data(using: .utf8)!
+        let library = try JSONDecoder().decode(LibraryData.self, from: old)
+        XCTAssertEqual(library.settings.serviceId, 3)
+        XCTAssertEqual(library.settings.maxHeight, 720)
+        XCTAssertFalse(library.settings.sponsorBlockEnabled)
+        XCTAssertEqual(library.subscriptions.count, 1)
+        XCTAssertEqual(library.history.first?.position, 12)
+    }
+
+    // MARK: Zip
+
+    private func fixture() throws -> Data {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "newpipe-backup", withExtension: "zip",
+                                                  subdirectory: "Fixtures"))
+        return try Data(contentsOf: url)
+    }
+
+    func testZipReadsStoredAndDeflatedEntries() throws {
+        let zip = try ZipArchive(fixture())
+        XCTAssertEqual(zip.names, ["newpipe.db", "newpipe.settings", "preferences.json", "stored.txt"])
+        XCTAssertEqual(String(decoding: try zip.read("stored.txt"), as: UTF8.self), "stored entry")
+        XCTAssertEqual(try zip.read("newpipe.db").prefix(15), Data("SQLite format 3".utf8))
+        XCTAssertThrowsError(try zip.read("absent"))
+    }
+
+    func testZipRejectsDamage() throws {
+        XCTAssertThrowsError(try ZipArchive(Data("not a zip at all, but long enough".utf8)))
+        var damaged = try fixture()
+        let archive = try ZipArchive(damaged)
+        XCTAssertNoThrow(try archive.read("newpipe.db"))
+        // Flip a byte in the payload of stored.txt, the first entry: 30-byte header, 10-byte name.
+        damaged[42] ^= 0xFF
+        let broken = try ZipArchive(damaged)
+        XCTAssertThrowsError(try broken.names.forEach { _ = try broken.read($0) })
+    }
+
+    // MARK: SponsorBlock
+
+    func testSha256MatchesKnownValues() {
+        XCTAssertEqual(SHA256Hash.hex("abc"),
+                       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        XCTAssertEqual(SHA256Hash.hex(String(repeating: "a", count: 119)).count, 64)
+    }
+
+    func testSponsorBlockUrlUsesOnlyTheHashPrefix() throws {
+        var settings = SponsorBlockSettings()
+        let url = try XCTUnwrap(SponsorBlockAPI.url(videoID: "abc", settings: settings))
+        XCTAssertTrue(url.path.hasSuffix("/api/skipSegments/ba78"))
+        XCTAssertFalse(url.absoluteString.contains("abc&"))
+        XCTAssertTrue(url.query?.contains("sponsor") == true)
+        XCTAssertFalse(url.query?.contains("filler") == true, "off by default")
+        for category in SponsorCategory.allCases { settings.modes[category.rawValue] = .off }
+        XCTAssertNil(SponsorBlockAPI.url(videoID: "abc", settings: settings))
+    }
+
+    func testSponsorBlockKeepsOnlyThisVideo() throws {
+        let json = #"""
+        [{"videoID":"other","segments":[{"category":"sponsor","actionType":"skip","segment":[1,2],"UUID":"x"}]},
+         {"videoID":"mine","segments":[
+           {"category":"intro","actionType":"skip","segment":[50,60],"UUID":"b","votes":1},
+           {"category":"sponsor","actionType":"skip","segment":[10,20],"UUID":"a"},
+           {"category":"poi_highlight","actionType":"poi","segment":[30,30],"UUID":"c"},
+           {"category":"sponsor","actionType":"mute","segment":[70,80],"UUID":"m"},
+           {"category":"future_kind","actionType":"skip","segment":[90,95],"UUID":"f"}]}]
+        """#.data(using: .utf8)!
+        let segments = try SponsorBlockAPI.segments(from: json, videoID: "mine")
+        XCTAssertEqual(segments.map(\.uuid), ["a", "c", "b"])
+        XCTAssertEqual(segments[1].isHighlight, true)
+    }
+
+    func testSkipPlanner() {
+        var settings = SponsorBlockSettings()
+        let sponsor = SponsorSegment(uuid: "s", category: .sponsor, start: 10, end: 20)
+        let promo = SponsorSegment(uuid: "p", category: .selfpromo, start: 30, end: 40)
+        let intro = SponsorSegment(uuid: "i", category: .intro, start: 0, end: 5)
+        let spot = SponsorSegment(uuid: "h", category: .highlight, isHighlight: true, start: 50, end: 50)
+        let all = [intro, sponsor, promo, spot]
+        func decide(_ at: Double, _ handled: Set<String> = []) -> SkipPlanner.Decision {
+            SkipPlanner.decide(position: at, segments: all, settings: settings, handled: handled)
+        }
+        XCTAssertEqual(decide(2), .none, "category switched off")
+        XCTAssertEqual(decide(15), .skip(sponsor))
+        XCTAssertEqual(decide(19.9), .none, "a seek that lands just short must not repeat")
+        XCTAssertEqual(decide(15, ["s"]), .none, "seeking back lets the user watch it")
+        XCTAssertEqual(decide(35), .offer(promo))
+        XCTAssertEqual(decide(50), .none, "highlights are jumped to, never skipped")
+    }
+
+    func testDislikeResponse() throws {
+        let json = #"{"id":"x","likes":110304,"dislikes":18652,"rating":4.4,"deleted":false}"#
+        let counts = try ReturnYouTubeDislikeAPI.counts(from: Data(json.utf8))
+        XCTAssertEqual(counts.dislikes, 18652)
+        XCTAssertEqual(ReturnYouTubeDislikeAPI.url(videoID: "a b", server: "https://e.com")?.absoluteString,
+                       "https://e.com/votes?videoId=a%20b")
+    }
+
+    // MARK: Backup import
+
+    private func entry(_ url: String, at seconds: Double, position: Double = 0) -> HistoryEntry {
+        HistoryEntry(item: InfoItem(type: .stream, serviceId: 0, url: url, name: url),
+                     watchedAt: Date(timeIntervalSince1970: seconds), position: position)
+    }
+
+    func testMergeKeepsNewestAndIsRepeatable() {
+        var library = LibraryData()
+        library.history = [entry("kept", at: 100), entry("updated", at: 50, position: 1)]
+        library.playlists = [LocalPlaylist(name: "Mine", items: [
+            InfoItem(type: .stream, serviceId: 0, url: "a", name: "a"),
+        ])]
+        library.searches = ["local"]
+        var backup = NewPipeBackup()
+        backup.history = [entry("kept", at: 10), entry("updated", at: 90, position: 7), entry("new", at: 70)]
+        backup.playlists = [LocalPlaylist(name: "Mine", items: [
+            InfoItem(type: .stream, serviceId: 0, url: "a", name: "a"),
+            InfoItem(type: .stream, serviceId: 0, url: "b", name: "b"),
+        ]), LocalPlaylist(name: "Theirs")]
+        backup.searches = ["local", "remote"]
+        backup.savedPlaylists = [InfoItem(type: .playlist, serviceId: 0, url: "r", name: "R")]
+        backup.feedGroups = [FeedGroup(name: "G", channelURLs: ["c"])]
+        backup.sponsorBlockWhitelist = ["Someone"]
+
+        let first = library.merge(backup)
+        XCTAssertEqual(library.history.map(\.item.url), ["kept", "updated", "new"])
+        XCTAssertEqual(library.history[1].position, 7)
+        XCTAssertEqual(library.playlists.first?.items.map(\.url), ["a", "b"])
+        XCTAssertEqual(library.playlists.count, 2)
+        XCTAssertEqual(library.searches, ["local", "remote"])
+        XCTAssertEqual(first.history, 2)
+        XCTAssertEqual(library.settings.sponsorBlock.whitelist, ["Someone"])
+
+        let snapshot = library
+        let second = library.merge(backup)
+        XCTAssertEqual(library, snapshot, "importing twice changes nothing")
+        XCTAssertEqual(second.history, 0)
+        XCTAssertEqual(second.playlistItems, 0)
+    }
+
+    #if canImport(SQLite3)
+    func testRealSchemaBackupImports() throws {
+        let backup = try NewPipeBackupReader.read(fixture())
+        XCTAssertEqual(backup.subscriptions.map(\.name), ["Blender", "Ambient Label"])
+        XCTAssertEqual(backup.subscriptions[0].avatar, "https://img/blender.jpg")
+        XCTAssertEqual(backup.history.map(\.item.name), ["Sprite Fright", "Agent 327", "Resume only"])
+        let first = backup.history[0]
+        XCTAssertEqual(first.position, 95.5, "progress_time is in milliseconds")
+        XCTAssertEqual(first.repeatCount, 3)
+        XCTAssertEqual(first.watchedAt.timeIntervalSince1970, 1_700_000_000)
+        XCTAssertEqual(first.item.duration, 629)
+        XCTAssertEqual(first.item.streamType, "VIDEO_STREAM")
+        XCTAssertEqual(first.item.thumbnails.first?.url, "https://img/sprite.jpg")
+        XCTAssertEqual(first.item.uploadDate, 1_600_000_000_000)
+        XCTAssertEqual(backup.playlists.map(\.name), ["Favourites", "Empty list"])
+        XCTAssertEqual(backup.playlists[0].items.map(\.name), ["Agent 327", "Sprite Fright"],
+                       "join_index order, without the duplicate")
+        XCTAssertEqual(backup.savedPlaylists.map(\.name), ["Open Movies"])
+        XCTAssertEqual(backup.savedPlaylists[0].streamCount, 14)
+        XCTAssertEqual(backup.feedGroups.map(\.name), ["Art"])
+        XCTAssertEqual(backup.feedGroups[0].channelURLs, ["https://www.youtube.com/channel/blender"])
+        XCTAssertEqual(backup.searches, ["newest search", "older search"])
+        XCTAssertEqual(backup.sponsorBlockWhitelist, ["Blender"])
+        XCTAssertEqual(backup.skippedOtherServices, 3, "BiliBili subscription, list row and remote list")
+
+        var library = LibraryData()
+        let summary = library.merge(backup)
+        XCTAssertEqual(summary.subscriptions, 2)
+        XCTAssertEqual(library.resumePosition(url: first.item.url, duration: 629), 95.5)
+    }
+
+    func testBareDatabaseAndWrongFiles() throws {
+        let database = try ZipArchive(fixture()).read("newpipe.db")
+        XCTAssertEqual(try NewPipeBackupReader.read(database).subscriptions.count, 2)
+        XCTAssertThrowsError(try NewPipeBackupReader.read(Data("{}".utf8))) {
+            XCTAssertEqual($0 as? NewPipeBackupError, .notABackup)
+        }
+    }
+    #endif
+
     func testHtmlIsStripped() {
         XCTAssertEqual(HTMLText.plain("a<br>b &amp; <a href=\"x\">c</a>", isHTML: true), "a\nb & c")
         XCTAssertEqual(HTMLText.plain("a<b", isHTML: false), "a<b")

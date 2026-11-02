@@ -3,10 +3,11 @@ import SwiftUI
 /// Newest videos across subscriptions.
 @MainActor
 final class FeedModel: ObservableObject {
-    @Published var items: [InfoItem] = []
     @Published var isLoading = false
     @Published var completed = 0
     @Published var failed: [String] = []
+    /// Per channel, so that a feed group can filter without fetching again.
+    @Published private var byChannel: [String: [InfoItem]] = [:]
     private var total = 0
 
     /// Requests to run at once. The services rate limit, and JS runs on one thread anyway.
@@ -18,7 +19,7 @@ final class FeedModel: ObservableObject {
         completed = 0
         failed = []
         total = subscriptions.count
-        var collected: [InfoItem] = []
+        byChannel = [:]
         var pending = subscriptions[...]
         await withTaskGroup(of: (Subscription, [InfoItem]?).self) { group in
             for _ in 0..<Self.concurrency {
@@ -28,11 +29,10 @@ final class FeedModel: ObservableObject {
             for await (subscription, videos) in group {
                 completed += 1
                 if let videos {
-                    collected += videos
+                    byChannel[subscription.url] = videos
                 } else {
                     failed.append(subscription.name)
                 }
-                items = Self.sorted(collected)
                 if let next = pending.popFirst() {
                     group.addTask { (next, try? await Self.videos(of: next)) }
                 }
@@ -51,6 +51,14 @@ final class FeedModel: ObservableObject {
             .items.filter { $0.type == .stream }
     }
 
+    /// Newest first, across the given channels or across all of them.
+    func items(in channels: [String]?) -> [InfoItem] {
+        let lists = channels.map { $0.compactMap { byChannel[$0] } } ?? Array(byChannel.values)
+        return Self.sorted(lists.flatMap { $0 })
+    }
+
+    var hasItems: Bool { !byChannel.isEmpty }
+
     private static func sorted(_ items: [InfoItem]) -> [InfoItem] {
         var seen = Set<String>()
         return items.filter { seen.insert($0.id).inserted }
@@ -64,9 +72,15 @@ struct FeedView: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var player: PlayerController
     @StateObject private var model = FeedModel()
+    @State private var groupID: UUID?
+
+    private var group: FeedGroup? {
+        store.library.feedGroups.first { $0.id == groupID }
+    }
 
     private var visibleItems: [InfoItem] {
-        store.library.settings.hideShorts ? model.items.filter { $0.isShort != true } : model.items
+        let items = model.items(in: group?.channelURLs)
+        return store.library.settings.hideShorts ? items.filter { $0.isShort != true } : items
     }
 
     var body: some View {
@@ -97,8 +111,20 @@ struct FeedView: View {
             ForEach(visibleItems) { LinkedItemRow(item: $0) }
         }
         .listStyle(.plain)
-        .navigationTitle("Feed")
+        .navigationTitle(group?.name ?? "Feed")
         .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                if !store.library.feedGroups.isEmpty {
+                    Menu {
+                        Picker("Feed group", selection: $groupID) {
+                            Text("All").tag(UUID?.none)
+                            ForEach(store.library.feedGroups) { Text($0.name).tag(UUID?.some($0.id)) }
+                        }
+                    } label: {
+                        Label("Feed group", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     player.play(visibleItems, startingAt: 0)
@@ -110,7 +136,7 @@ struct FeedView: View {
         }
         .refreshable { await model.load(store.library.subscriptions) }
         .task {
-            if model.items.isEmpty && !store.library.subscriptions.isEmpty {
+            if !model.hasItems && !store.library.subscriptions.isEmpty {
                 await model.load(store.library.subscriptions)
             }
         }

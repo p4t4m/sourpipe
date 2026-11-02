@@ -20,7 +20,15 @@ public struct HistoryEntry: Codable, Hashable, Identifiable {
     public var watchedAt: Date
     /// Seconds watched, used to resume.
     public var position: Double
+    public var repeatCount: Int?
     public var id: String { item.url }
+
+    public init(item: InfoItem, watchedAt: Date, position: Double, repeatCount: Int? = nil) {
+        self.item = item
+        self.watchedAt = watchedAt
+        self.position = position
+        self.repeatCount = repeatCount
+    }
 }
 
 public struct LocalPlaylist: Codable, Hashable, Identifiable {
@@ -66,13 +74,47 @@ public struct AppSettings: Codable, Equatable {
     public var recordHistory = true
     public var showComments = true
     public var hideShorts = false
+    /// Off until chosen: both features contact a third-party server.
+    public var sponsorBlockEnabled = false
+    public var sponsorBlock = SponsorBlockSettings()
+    public var dislikesEnabled = false
+    public var dislikesServer = ReturnYouTubeDislikeAPI.defaultServer
 
     public init() {}
+
+    enum CodingKeys: CodingKey {
+        case serviceId, language, country, maxHeight, audioOnly, autoplayRelated, resumePlayback
+        case recordHistory, showComments, hideShorts, sponsorBlockEnabled, sponsorBlock
+        case dislikesEnabled, dislikesServer
+    }
+
+    /// Every key is optional: a file saved by an older version must load, not fail as a whole.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T {
+            try c.decodeIfPresent(T.self, forKey: key) ?? fallback
+        }
+        serviceId = try value(.serviceId, 0)
+        language = try value(.language, "en")
+        country = try value(.country, "US")
+        maxHeight = try value(.maxHeight, 0)
+        audioOnly = try value(.audioOnly, false)
+        autoplayRelated = try value(.autoplayRelated, false)
+        resumePlayback = try value(.resumePlayback, true)
+        recordHistory = try value(.recordHistory, true)
+        showComments = try value(.showComments, true)
+        hideShorts = try value(.hideShorts, false)
+        sponsorBlockEnabled = try value(.sponsorBlockEnabled, false)
+        sponsorBlock = try value(.sponsorBlock, SponsorBlockSettings())
+        dislikesEnabled = try value(.dislikesEnabled, false)
+        dislikesServer = try value(.dislikesServer, ReturnYouTubeDislikeAPI.defaultServer)
+    }
 }
 
 /// Everything the app persists. Plain data: AppStore wraps it for SwiftUI and writes it to disk.
 public struct LibraryData: Codable, Equatable {
-    public static let historyLimit = 1000
+    public static let historyLimit = 5000
+    public static let searchLimit = 50
 
     public var settings = AppSettings()
     public var subscriptions: [Subscription] = []
@@ -80,11 +122,14 @@ public struct LibraryData: Codable, Equatable {
     public var playlists: [LocalPlaylist] = []
     public var downloads: [DownloadRecord] = []
     public var searches: [String] = []
+    public var savedPlaylists: [InfoItem] = []
+    public var feedGroups: [FeedGroup] = []
 
     public init() {}
 
     enum CodingKeys: CodingKey {
         case settings, subscriptions, history, playlists, downloads, searches
+        case savedPlaylists, feedGroups
     }
 
     /// Fields missing from an older file keep their defaults instead of failing the whole load.
@@ -96,6 +141,8 @@ public struct LibraryData: Codable, Equatable {
         playlists = try c.decodeIfPresent([LocalPlaylist].self, forKey: .playlists) ?? []
         downloads = try c.decodeIfPresent([DownloadRecord].self, forKey: .downloads) ?? []
         searches = try c.decodeIfPresent([String].self, forKey: .searches) ?? []
+        savedPlaylists = try c.decodeIfPresent([InfoItem].self, forKey: .savedPlaylists) ?? []
+        feedGroups = try c.decodeIfPresent([FeedGroup].self, forKey: .feedGroups) ?? []
     }
 
     public func isSubscribed(_ url: String) -> Bool {
@@ -138,7 +185,7 @@ public struct LibraryData: Codable, Equatable {
         guard !trimmed.isEmpty else { return }
         searches.removeAll { $0 == trimmed }
         searches.insert(trimmed, at: 0)
-        if searches.count > 50 { searches.removeLast(searches.count - 50) }
+        if searches.count > Self.searchLimit { searches.removeLast(searches.count - Self.searchLimit) }
     }
 
     public mutating func add(_ item: InfoItem, toPlaylist id: UUID) {

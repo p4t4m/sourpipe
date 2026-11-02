@@ -44,6 +44,12 @@ struct LibraryView: View {
                     Label("New playlist", systemImage: "plus")
                 }
             }
+            if !store.library.savedPlaylists.isEmpty {
+                Section("Bookmarked playlists") {
+                    ForEach(store.library.savedPlaylists) { LinkedItemRow(item: $0) }
+                        .onDelete { store.library.savedPlaylists.remove(atOffsets: $0) }
+                }
+            }
         }
         .navigationTitle("Library")
         .alert("New playlist", isPresented: $creating) {
@@ -124,7 +130,12 @@ struct HistoryView: View {
     var body: some View {
         List {
             ForEach(store.library.history) { entry in
-                LinkedItemRow(item: entry.item)
+                VStack(alignment: .leading, spacing: 2) {
+                    LinkedItemRow(item: entry.item)
+                    if let count = entry.repeatCount, count > 1 {
+                        Text("Played \(count) times").font(.caption2).foregroundColor(.secondary)
+                    }
+                }
             }
             .onDelete { store.library.history.remove(atOffsets: $0) }
         }

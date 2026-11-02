@@ -9,6 +9,7 @@ let package = Package(
     targets: [
         .target(name: "SourPipeCore", path: "SourPipe/Core"),
         .testTarget(name: "SourPipeCoreTests", dependencies: ["SourPipeCore"],
-                    path: "Tests/SourPipeCoreTests"),
+                    path: "Tests/SourPipeCoreTests",
+                    resources: [.copy("Fixtures")]),
     ]
 )

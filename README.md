@@ -49,13 +49,22 @@ need your Apple ID credentials.
 - Playback through AVPlayer: adaptive quality, a maximum quality setting, audio-only mode, background
   audio, lock-screen controls, Picture in Picture, AirPlay, a queue and resume.
 - Stored on the device: subscriptions with a feed, history, local playlists and downloads (also
-  visible in the Files app). Imports the `subscriptions.json` that NewPipe on Android exports.
+  visible in the Files app).
+- Imports a full NewPipe backup, including from Tubular and PipePipe: subscriptions, history with resume
+  positions and play counts, playlists, bookmarked playlists, feed groups and searches. Export it on
+  Android from Settings > Backup and restore, then use Settings > Import NewPipe backup. Nothing already
+  in the library is deleted, and importing twice changes nothing. App preferences are not carried over,
+  and rows from services this app lacks (PipePipe's BiliBili and NicoNico) are skipped and counted.
+- [SponsorBlock](https://sponsor.ajay.app) on YouTube, as in Tubular and PipePipe: skip, ask or ignore per
+  category, undo, highlights, and an exception per channel. Off until enabled in Settings.
+- [Return YouTube Dislike](https://returnyoutubedislike.com) counts on YouTube. Off until enabled, because
+  that server is told the ID of every video you open.
 
 ### Not included
 
 - Subtitles. The extractor returns them, but AVPlayer cannot add external tracks to these streams.
 - Solving CAPTCHAs. When a service rate limits you, the app says so; try later or on another network.
-- NewPipe's database import (only the subscriptions export is read), and sign-in of any kind.
+- Sign-in of any kind, and submitting SponsorBlock segments or votes.
 - App Store distribution. Apple does not accept apps of this kind, so install it from Xcode.
 
 ## How it works
@@ -75,7 +84,7 @@ is unmodified in structure and requests can overlap.
 
 | Path | Purpose |
 | --- | --- |
-| `ios/SourPipe/Core` | Models, stream selection, library data. Foundation only; tested with `swift test`, including on Linux |
+| `ios/SourPipe/Core` | Models, stream selection, library data, backup import, skip logic. Tested with `swift test`; the SQLite part needs an Apple platform, the rest also runs on Linux |
 | `ios/SourPipe/{App,Extractor,Player,Views}` | The Apple-only app |
 | `extractor/upstream.lock` | The NewPipeExtractor commit in use |
 | `extractor/patches/` | Changes to upstream source, applied on top of that commit |

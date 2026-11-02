@@ -110,6 +110,9 @@ struct StreamView: View {
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .frame(maxWidth: .infinity)
+        .overlay(alignment: .topTrailing) {
+            if isCurrent { SkipBanner() }
+        }
     }
 
     /// Audio mode has no system player controls, so it brings its own.
@@ -162,6 +165,7 @@ struct StreamDetailsSection: View {
     @EnvironmentObject private var downloads: DownloadManager
     @State private var pane = Pane.related
     @State private var showDescription = false
+    @State private var dislikes: DislikeCounts?
 
     enum Pane: String, CaseIterable {
         case related = "Related", comments = "Comments", queue = "Queue"
@@ -176,6 +180,7 @@ struct StreamDetailsSection: View {
         }
         actionRow
         uploaderRow
+        sponsorBlockRows
         if let description = details.description, !description.isEmpty {
             DisclosureGroup("Description", isExpanded: $showDescription) {
                 Text(HTMLText.plain(description, isHTML: details.descriptionType == "html"))
@@ -212,6 +217,40 @@ struct StreamDetailsSection: View {
         case .queue:
             QueueSection()
         }
+        EmptyView()
+            .task(id: details.url) {
+                let settings = store.library.settings
+                guard settings.dislikesEnabled, details.serviceId == 0,
+                      let videoID = details.id else { return }
+                dislikes = await CommunityServices.dislikes(videoID: videoID,
+                                                            server: settings.dislikesServer)
+            }
+    }
+
+    @ViewBuilder private var sponsorBlockRows: some View {
+        let settings = store.library.settings
+        if settings.sponsorBlockEnabled, details.serviceId == 0, let uploader = details.uploaderName {
+            if isCurrent, !player.segments.isEmpty {
+                DisclosureGroup("SponsorBlock (\(player.segments.count))") {
+                    ForEach(player.segments) { segment in
+                        Button {
+                            player.seek(to: segment.start)
+                        } label: {
+                            HStack {
+                                Text(Format.duration(Int64(max(segment.start, 1))))
+                                    .font(.caption.monospacedDigit())
+                                Text(segment.category.title).font(.footnote)
+                            }
+                        }
+                    }
+                }
+            }
+            Toggle("Skip segments on this channel", isOn: Binding(
+                get: { !settings.sponsorBlock.whitelist.contains(uploader) },
+                set: { player.setWhitelisted(!$0, uploader: uploader) }
+            ))
+            .font(.footnote)
+        }
     }
 
     private var uniqueRelated: [InfoItem] {
@@ -222,7 +261,9 @@ struct StreamDetailsSection: View {
     private var statistics: String {
         var parts: [String] = []
         if let views = Format.views(details.viewCount) { parts.append(views) }
-        if let likes = Format.compact(details.likeCount) { parts.append(likes + " likes") }
+        let likes = (details.likeCount ?? -1) >= 0 ? details.likeCount : dislikes?.likes
+        if let likes = Format.compact(likes) { parts.append(likes + " likes") }
+        if let count = Format.compact(dislikes?.dislikes) { parts.append(count + " dislikes") }
         if let date = details.textualUploadDate, !date.isEmpty { parts.append(Format.date(date)) }
         if isCurrent, !player.sourceLabel.isEmpty { parts.append(player.sourceLabel) }
         return parts.joined(separator: " • ")
@@ -231,6 +272,14 @@ struct StreamDetailsSection: View {
     private var actionRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack {
+                if isCurrent, let highlight = player.segments.first(where: \.isHighlight),
+                   store.library.settings.sponsorBlock.mode(for: .highlight) != .off {
+                    Button {
+                        player.seek(to: highlight.start)
+                    } label: {
+                        Label("Highlight", systemImage: "star")
+                    }
+                }
                 Button {
                     player.setAudioOnly(!player.isAudioOnly)
                 } label: {
@@ -294,6 +343,24 @@ struct StreamDetailsSection: View {
                 }
             }
         }
+    }
+}
+
+/// The skip button, or the notice after an automatic skip.
+struct SkipBanner: View {
+    @EnvironmentObject private var player: PlayerController
+
+    var body: some View {
+        Group {
+            if let segment = player.recentSkip {
+                Button("Skipped \(segment.category.title) • Undo") { player.undoRecentSkip() }
+            } else if let segment = player.offeredSkip {
+                Button("Skip \(segment.category.title)") { player.acceptOfferedSkip() }
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .font(.caption.weight(.semibold))
+        .padding(8)
     }
 }
 

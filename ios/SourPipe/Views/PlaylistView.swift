@@ -5,6 +5,7 @@ struct PlaylistView: View {
     let url: String
     let name: String
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var store: AppStore
     @StateObject private var model = ItemListModel()
     @State private var playlist: PlaylistDetails?
     @State private var error: String?
@@ -47,7 +48,32 @@ struct PlaylistView: View {
         }
         .navigationTitle(playlist?.name ?? name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if let playlist {
+                    let saved = store.library.savedPlaylists.contains { $0.url == playlist.url }
+                    Button {
+                        toggleSaved(playlist, saved: saved)
+                    } label: {
+                        Label(saved ? "Remove bookmark" : "Bookmark",
+                              systemImage: saved ? "bookmark.fill" : "bookmark")
+                    }
+                }
+            }
+        }
         .task { if playlist == nil { await load() } }
+    }
+
+    private func toggleSaved(_ playlist: PlaylistDetails, saved: Bool) {
+        if saved {
+            store.library.savedPlaylists.removeAll { $0.url == playlist.url }
+        } else {
+            var item = InfoItem(type: .playlist, serviceId: playlist.serviceId, url: playlist.url,
+                                name: playlist.name, thumbnails: playlist.thumbnails)
+            item.uploaderName = playlist.uploaderName
+            item.streamCount = playlist.streamCount
+            store.library.savedPlaylists.append(item)
+        }
     }
 
     @MainActor private func load() async {

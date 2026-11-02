@@ -31,6 +31,11 @@ final class PlayerController: ObservableObject {
     @Published private(set) var position: Double = 0
     @Published private(set) var duration: Double = 0
     @Published private(set) var isAudioOnly = false
+    @Published private(set) var segments: [SponsorSegment] = []
+    /// A segment the user can skip with a button.
+    @Published private(set) var offeredSkip: SponsorSegment?
+    /// The segment just skipped automatically, shown briefly with an undo.
+    @Published private(set) var recentSkip: SponsorSegment?
 
     let player = AVPlayer()
 
@@ -44,6 +49,9 @@ final class PlayerController: ObservableObject {
     private var rateObserver: NSKeyValueObservation?
     private var lastSavedPosition: Double = 0
     private var artwork: MPMediaItemArtwork?
+    private var handledSegments = Set<String>()
+    private var segmentTask: Task<Void, Never>?
+    private var recentSkipTask: Task<Void, Never>?
 
     var current: QueueEntry? { queue.indices.contains(index) ? queue[index] : nil }
     var hasNext: Bool { index + 1 < queue.count }
@@ -63,7 +71,7 @@ final class PlayerController: ObservableObject {
             }
         }
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 1, preferredTimescale: 1), queue: .main
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             MainActor.assumeIsolated { self?.tick(time) }
         }
@@ -152,6 +160,7 @@ final class PlayerController: ObservableObject {
         duration = 0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         artwork = nil
+        clearSegments()
     }
 
     private func setQueue(_ entries: [QueueEntry], start: Int) {
@@ -212,6 +221,7 @@ final class PlayerController: ObservableObject {
         position = 0
         duration = Double(entry.item.duration ?? 0)
         artwork = nil
+        clearSegments()
         activateAudioSession()
         updateNowPlaying()
 
@@ -238,6 +248,7 @@ final class PlayerController: ObservableObject {
                     return
                 }
                 self.record(details.asItem)
+                self.loadSegments(for: details, entry: entry)
                 let start = details.startPosition.map(Double.init).flatMap { $0 > 0 ? $0 : nil }
                 self.startSource(resumeAt: start ?? self.resumePosition(for: details.asItem))
             } catch {
@@ -397,6 +408,7 @@ final class PlayerController: ObservableObject {
     private func tick(_ time: CMTime) {
         guard time.isNumeric else { return }
         position = time.seconds
+        applySkips()
         if let item = player.currentItem { updateDuration(from: item) }
         if abs(position - lastSavedPosition) >= 10 { savePosition() }
     }
@@ -411,6 +423,77 @@ final class PlayerController: ObservableObject {
               position > 0 else { return }
         lastSavedPosition = position
         store.library.updatePosition(url: item.url, position: position)
+    }
+
+    // MARK: SponsorBlock
+
+    private func clearSegments() {
+        segmentTask?.cancel()
+        recentSkipTask?.cancel()
+        segments = []
+        handledSegments = []
+        offeredSkip = nil
+        recentSkip = nil
+    }
+
+    private func loadSegments(for details: StreamDetails, entry: QueueEntry) {
+        let settings = store.library.settings
+        guard settings.sponsorBlockEnabled, details.serviceId == 0, !details.isLive,
+              let videoID = details.id,
+              !settings.sponsorBlock.whitelist.contains(details.uploaderName ?? "") else { return }
+        segmentTask = Task { [weak self] in
+            let found = await CommunityServices.segments(videoID: videoID,
+                                                         settings: settings.sponsorBlock)
+            guard let self, !Task.isCancelled, self.current?.id == entry.id else { return }
+            self.segments = found
+        }
+    }
+
+    private func applySkips() {
+        guard !segments.isEmpty else { return }
+        switch SkipPlanner.decide(position: position, segments: segments,
+                                  settings: store.library.settings.sponsorBlock,
+                                  handled: handledSegments) {
+        case .skip(let segment):
+            handledSegments.insert(segment.uuid)
+            offeredSkip = nil
+            seek(to: segment.end)
+            recentSkip = segment
+            recentSkipTask?.cancel()
+            recentSkipTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if !Task.isCancelled { self?.recentSkip = nil }
+            }
+        case .offer(let segment):
+            offeredSkip = segment
+        case .none:
+            offeredSkip = nil
+        }
+    }
+
+    func acceptOfferedSkip() {
+        guard let segment = offeredSkip else { return }
+        handledSegments.insert(segment.uuid)
+        offeredSkip = nil
+        seek(to: segment.end)
+    }
+
+    func undoRecentSkip() {
+        guard let segment = recentSkip else { return }
+        recentSkipTask?.cancel()
+        recentSkip = nil
+        seek(to: segment.start)
+    }
+
+    /// Whether a channel's segments apply. Takes effect at once for the video playing now.
+    func setWhitelisted(_ whitelisted: Bool, uploader: String) {
+        store.library.settings.sponsorBlock.whitelist.removeAll { $0 == uploader }
+        if whitelisted {
+            store.library.settings.sponsorBlock.whitelist.append(uploader)
+            clearSegments()
+        } else if let details, let entry = current, details.uploaderName == uploader {
+            loadSegments(for: details, entry: entry)
+        }
     }
 
     // MARK: System integration
