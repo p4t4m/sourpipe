@@ -382,4 +382,60 @@ final class CoreTests: XCTestCase {
             XCTAssertFalse(PlaybackPlanner.sources(for: details, preferences: .init()).isEmpty, name)
         }
     }
+
+    func testCaptchaRedirectGivesTheExemptionCookie() throws {
+        let redirect = URL(string: "https://www.youtube.com/watch?v=abc&google_abuse="
+            + "GOOGLE_ABUSE_EXEMPTION%3DID%3D0a1b:TM%3D1700000000:C%3Dr:IP%3D203.0.113.9-:S%3Dxyz%3D"
+            + "%3B+path%3D/%3B+domain%3Dyoutube.com%3B+expires%3DThu,+05-Nov-2026+12:00:00+GMT")!
+        let cookie = try XCTUnwrap(CaptchaCookieJar.abuseExemption(fromRedirect: redirect))
+        XCTAssertEqual(cookie.name, "GOOGLE_ABUSE_EXEMPTION")
+        XCTAssertEqual(cookie.value, "ID=0a1b:TM=1700000000:C=r:IP=203.0.113.9-:S=xyz=")
+        XCTAssertEqual(cookie.domain, "youtube.com")
+        XCTAssertEqual(cookie.expires, Date(timeIntervalSince1970: 1_793_880_000))
+        XCTAssertNil(CaptchaCookieJar.abuseExemption(
+            fromRedirect: URL(string: "https://www.youtube.com/watch?v=abc")!))
+    }
+
+    func testCaptchaCookiesGoOnlyToTheirSite() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        var jar = CaptchaCookieJar()
+        jar.store([
+            StoredCookie(name: "GOOGLE_ABUSE_EXEMPTION", value: "a", domain: ".youtube.com"),
+            StoredCookie(name: "old", value: "x", domain: "youtube.com",
+                         expires: Date(timeIntervalSince1970: 500)),
+        ], now: now)
+        jar.store([StoredCookie(name: "GOOGLE_ABUSE_EXEMPTION", value: "b", domain: "youtube.com")],
+                  now: now)
+        XCTAssertEqual(jar.cookies.count, 1)
+        XCTAssertEqual(jar.header(for: URL(string: "https://www.youtube.com/youtubei/v1/player")!,
+                                  now: now), "GOOGLE_ABUSE_EXEMPTION=b")
+        XCTAssertNil(jar.header(for: URL(string: "https://notyoutube.com/")!, now: now))
+        XCTAssertNil(jar.header(for: URL(string: "https://api-v2.soundcloud.com/")!, now: now))
+
+        XCTAssertEqual(CaptchaCookieJar.merge(existing: "SOCS=CAE; GOOGLE_ABUSE_EXEMPTION=mine",
+                                              extra: "GOOGLE_ABUSE_EXEMPTION=b; s_gl=GB"),
+                       "SOCS=CAE; GOOGLE_ABUSE_EXEMPTION=mine; s_gl=GB")
+        XCTAssertEqual(CaptchaCookieJar.merge(existing: nil, extra: "a=1"), "a=1")
+        XCTAssertEqual(CaptchaCookieJar.merge(existing: "a=1", extra: nil), "a=1")
+
+        let kept = CaptchaCookieJar.relevant([
+            StoredCookie(name: "NID", value: "1", domain: ".google.com"),
+            StoredCookie(name: "GOOGLE_ABUSE_EXEMPTION", value: "2", domain: ".google.com"),
+            StoredCookie(name: "PREF", value: "3", domain: ".youtube.com"),
+            StoredCookie(name: "cf_clearance", value: "4", domain: ".example.org"),
+            StoredCookie(name: "tracker", value: "5", domain: "ads.other.net"),
+        ], challengeHost: "video.example.org")
+        XCTAssertEqual(kept.map(\.value), ["2", "4"])
+        XCTAssertTrue(CaptchaCookieJar.isChallengePage(
+            URL(string: "https://www.google.com/sorry/index?continue=x")!))
+        XCTAssertFalse(CaptchaCookieJar.isChallengePage(URL(string: "https://www.youtube.com/")!))
+    }
+
+    func testCaptchaFailureCarriesItsUrl() throws {
+        let failure = try JSONDecoder().decode(ExtractorFailure.self, from: Data(
+            #"{"kind":"recaptcha","message":"m","url":"https://www.youtube.com/watch?v=a"}"#.utf8))
+        XCTAssertEqual(failure.url, "https://www.youtube.com/watch?v=a")
+        XCTAssertNil(try JSONDecoder().decode(ExtractorFailure.self,
+                                              from: Data(#"{"kind":"network","message":"m"}"#.utf8)).url)
+    }
 }

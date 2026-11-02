@@ -57,13 +57,17 @@ need your Apple ID credentials.
   and rows from services this app lacks (PipePipe's BiliBili and NicoNico) are skipped and counted.
 - [SponsorBlock](https://sponsor.ajay.app) on YouTube, as in Tubular and PipePipe: skip, ask or ignore per
   category, undo, highlights, and an exception per channel. Off until enabled in Settings.
+- CAPTCHA solving, as in NewPipe. When a service answers with HTTP 429, a bar offers to open its
+  challenge in a web view. Once it is solved, the cookies it sets (for Google, only the ones NewPipe
+  keeps, such as `GOOGLE_ABUSE_EXEMPTION`) are stored and sent with later requests to that site.
+  Settings > CAPTCHA forgets them. YouTube's "confirm you're not a bot" error is a different check,
+  which a CAPTCHA does not clear.
 - [Return YouTube Dislike](https://returnyoutubedislike.com) counts on YouTube. Off until enabled, because
   that server is told the ID of every video you open.
 
 ### Not included
 
 - Subtitles. The extractor returns them, but AVPlayer cannot add external tracks to these streams.
-- Solving CAPTCHAs. When a service rate limits you, the app says so; try later or on another network.
 - Sign-in of any kind, and submitting SponsorBlock segments or votes.
 - App Store distribution. Apple does not accept apps of this kind, so install it from Xcode.
 

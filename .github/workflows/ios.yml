@@ -69,6 +69,16 @@ jobs:
           echo "Testing $ccc and $peertube"
           capture mediaccc "$ccc" -testDislikeVideoID aqz-KE-bpKQ
           capture peertube "$peertube"
+          # The CAPTCHA banner, then the challenge page opened in the web view.
+          sorry='https://www.google.com/sorry/index?continue=https://www.youtube.com/'
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testCaptcha "$sorry"
+          sleep 20
+          xcrun simctl io "$device" screenshot captcha-banner.png
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -testCaptcha "$sorry" -testCaptchaOpen YES
+          sleep 25
+          xcrun simctl io "$device" screenshot captcha-sheet.png
           # Skipping while backgrounded, which also starts Picture in Picture where available.
           xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
           xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$peertube" -testSkipAfter 25
@@ -77,7 +87,7 @@ jobs:
           sleep 60
           xcrun simctl io "$device" screenshot background.png
           xcrun simctl spawn "$device" log show --last 6m --style compact \
-            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]" OR eventMessage CONTAINS "[dislikes]"' > player.log || true
+            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]" OR eventMessage CONTAINS "[dislikes]" OR eventMessage CONTAINS "[captcha]"' > player.log || true
           cat player.log
       - uses: actions/upload-artifact@v4
         if: always()

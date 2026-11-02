@@ -41,6 +41,31 @@ final class HostDownloader extends Downloader {
                 (response, error) -> callback.complete(new Raw(response, error)));
     }
 
+    /**
+     * The page the app opens for the user to solve the challenge. A GET is simply repeated, as
+     * NewPipe does, and the service redirects to its challenge. An API POST cannot be repeated in a
+     * browser, so use the challenge page it was redirected to, or else the site's home page.
+     */
+    private static String challengeUrl(final Request request, final String finalUrl) {
+        if ("GET".equals(request.httpMethod())) {
+            return request.url();
+        }
+        if (!finalUrl.equals(request.url())) {
+            return finalUrl;
+        }
+        final String url = request.url();
+        final int scheme = url.indexOf("://");
+        if (scheme < 0) {
+            return url;
+        }
+        final int path = url.indexOf('/', scheme + 3);
+        String origin = path < 0 ? url : url.substring(0, path);
+        if (origin.endsWith("youtubei.googleapis.com")) {
+            origin = "https://www.youtube.com";
+        }
+        return origin + "/";
+    }
+
     @Override
     public Response execute(final Request request) throws IOException, ReCaptchaException {
         final JsonObject headers = new JsonObject();
@@ -61,7 +86,8 @@ final class HostDownloader extends Downloader {
         }
         final int status = json.getInt("status");
         if (status == 429) {
-            throw new ReCaptchaException("reCaptcha Challenge requested", request.url());
+            throw new ReCaptchaException("reCaptcha Challenge requested",
+                    challengeUrl(request, json.getString("url", request.url())));
         }
         final Map<String, List<String>> responseHeaders = new HashMap<>();
         final JsonObject headerObject = json.getObject("headers");

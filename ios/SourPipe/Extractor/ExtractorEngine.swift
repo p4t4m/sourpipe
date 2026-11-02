@@ -23,7 +23,7 @@ final class ExtractorEngine: NSObject {
     private static let maxWorkers = 3
 
     /// NewPipe's own downloader uses this as its default, so services see the same client.
-    private static let userAgent =
+    static let userAgent =
         "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0"
 
     private var thread: Thread!
@@ -136,6 +136,12 @@ final class ExtractorEngine: NSObject {
                 request.setValue(values.joined(separator: ", "), forHTTPHeaderField: name)
             }
         }
+        // As NewPipe's downloader does, send what a solved CAPTCHA left behind.
+        if let cookies = CaptchaCookieJar.merge(
+            existing: request.value(forHTTPHeaderField: "Cookie"),
+            extra: CaptchaCookieStore.shared.header(for: target)) {
+            request.setValue(cookies, forHTTPHeaderField: "Cookie")
+        }
         if let bodyBase64 {
             request.httpBody = Data(base64Encoded: bodyBase64)
         }
@@ -206,6 +212,7 @@ final class ExtractorEngine: NSObject {
                 let failure = (try? JSONDecoder().decode(ExtractorFailure.self,
                                                          from: Data(text.utf8)))
                     ?? ExtractorFailure(kind: "extraction", message: text)
+                CaptchaSolver.report(failure)
                 continuation.resume(throwing: failure)
             } else {
                 continuation.resume(returning: Data((result.toString() ?? "{}").utf8))

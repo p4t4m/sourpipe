@@ -17,6 +17,10 @@ const decodeB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const host = {
   log: (m) => verbose && console.error("[bundle]", m),
   http(method, url, headersJson, bodyBase64, callback) {
+    if (host.rateLimited) {
+      const sorry = "https://www.google.com/sorry/index?continue=" + encodeURIComponent(url);
+      return callback(JSON.stringify({ status: 429, url: method === "GET" ? sorry : url, headers: {}, body: "" }), null);
+    }
     const headers = {};
     for (const [k, v] of Object.entries(JSON.parse(headersJson))) headers[k] = v.join(", ");
     if (verbose) console.error("[http]", method, url.slice(0, 110));
@@ -45,7 +49,7 @@ export function load() {
     const finish = () => {
       if (!ctx.__sourpipeCall) return setTimeout(finish, 5);
       ctx.__sourpipeCall(method, JSON.stringify(args), (result, error) => {
-        if (error != null) { const e = JSON.parse(error); reject(Object.assign(new Error(e.message), { kind: e.kind })); }
+        if (error != null) { const e = JSON.parse(error); reject(Object.assign(new Error(e.message), { kind: e.kind, url: e.url })); }
         else resolve(Object.assign(JSON.parse(result), { __ms: Date.now() - started }));
       });
     };
@@ -166,6 +170,19 @@ const tests = {
     const s = firstOf(r.items, "stream"); check(s, "show");
     const i = await call("stream", { serviceId: BC, url: s.url });
     return `${i.name} audio=${i.audioStreams.length} date=${i.uploadDate}`;
+  },
+  captcha: async () => {
+    // A 429 must surface as "recaptcha" with a page the user can open to solve it.
+    host.rateLimited = true;
+    try {
+      const page = "https://www.youtube.com/channel/UCSMOQeBJ2RAnuFungnQOxLg";
+      const error = await call("channel", { serviceId: YT, url: page }).then(() => null, (e) => e);
+      check(error && error.kind === "recaptcha", "kind " + error?.kind);
+      check(error.url && /^https:\/\/(www\.youtube\.com|www\.google\.com\/sorry)/.test(error.url), "url " + error.url);
+      return error.url.slice(0, 80);
+    } finally {
+      host.rateLimited = false;
+    }
   },
   mediaccc: async () => {
     const r = await call("kiosk", { serviceId: MCCC, id: "recent" });

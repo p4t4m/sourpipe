@@ -103,6 +103,9 @@ public final class Main {
             kind = "extraction";
         }
         o.put("kind", kind);
+        if (t instanceof ReCaptchaException && ((ReCaptchaException) t).getUrl() != null) {
+            o.put("url", ((ReCaptchaException) t).getUrl());
+        }
         final StringBuilder message = new StringBuilder();
         Throwable current = t;
         for (int depth = 0; current != null && depth < 5; depth++) {

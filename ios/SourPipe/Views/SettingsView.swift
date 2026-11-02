@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var importing = false
     @State private var importMessage: String?
     @State private var isImporting = false
+    @State private var captchaCookies = CaptchaCookieStore.shared.count
 
     private static let languages = [
         ("en", "English"), ("de", "Deutsch"), ("es", "Español"), ("fr", "Français"),
@@ -91,6 +92,17 @@ struct SettingsView: View {
             } footer: {
                 Text("YouTube only. The counts are estimates. The server receives the ID of each video you open, and your IP address.")
             }
+            Section {
+                Button("Forget CAPTCHA cookies (\(captchaCookies))", role: .destructive) {
+                    CaptchaCookieStore.shared.clear()
+                    captchaCookies = 0
+                }
+                .disabled(captchaCookies == 0)
+            } header: {
+                Text("CAPTCHA")
+            } footer: {
+                Text("When a service asks for a CAPTCHA, solving it in the app keeps the cookies it sets and sends them to that service only.")
+            }
             Section("About") {
                 LabeledContent("Extractor", value: ExtractorVersion.commit)
                 Link("Licence: GPL v3 or later",
@@ -98,6 +110,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onAppear { captchaCookies = CaptchaCookieStore.shared.count }
         .onChange(of: store.library.settings.language) { _ in store.applyLocalization() }
         .onChange(of: store.library.settings.country) { _ in store.applyLocalization() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.zip, .json, .data]) { result in

@@ -52,7 +52,10 @@ extension View {
 
     func miniPlayerInset(showing: Binding<Bool>) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
-            MiniPlayerBar(showing: showing)
+            VStack(spacing: 0) {
+                CaptchaBanner()
+                MiniPlayerBar(showing: showing)
+            }
         }
     }
 }
@@ -108,6 +111,10 @@ struct RootView: View {
         #if DEBUG
         // CI launches with `-openLink <url>`: a sourpipe:// link would stop at a system prompt.
         .task {
+            if let page = UserDefaults.standard.string(forKey: "testCaptcha"),
+               let url = URL(string: page) {
+                CaptchaSolver.shared.request(url)
+            }
             if let link = UserDefaults.standard.string(forKey: "openLink") {
                 linkTarget = try? await LinkResolver.route(for: link)
             }

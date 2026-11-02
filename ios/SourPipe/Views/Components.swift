@@ -136,6 +136,7 @@ struct StatusView: View {
                 .font(.footnote)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+            CaptchaSolveButton(retry: retry)
             if let retry {
                 Button("Try again") { retry() }
                     .buttonStyle(.bordered)

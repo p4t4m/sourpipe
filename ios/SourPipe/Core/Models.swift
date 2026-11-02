@@ -281,17 +281,20 @@ public struct SuggestionList: Codable {
 public struct ExtractorFailure: Error, Codable, LocalizedError {
     public var kind: String
     public var message: String
+    /// For "recaptcha": the page to open so the user can solve the challenge.
+    public var url: String?
 
-    public init(kind: String, message: String) {
+    public init(kind: String, message: String, url: String? = nil) {
         self.kind = kind
         self.message = message
+        self.url = url
     }
 
     public var errorDescription: String? {
         switch kind {
         case "recaptcha":
-            return "The service is rate limiting this network (CAPTCHA requested). "
-                + "Try again later or on another network."
+            return "The service wants a CAPTCHA solved before it answers this network. "
+                + "Solve it, or try again later or on another network."
         case "botCheck":
             return "YouTube is refusing anonymous playback from this network. "
                 + "Try again later or on another network."
