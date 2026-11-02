@@ -76,6 +76,9 @@ final class PlayerController: ObservableObject {
     private var timeObserver: Any?
     private var rateObserver: NSKeyValueObservation?
     private var lastSavedPosition: Double = 0
+    /// The real length when known: from a fragmented file's index, else the service's figure.
+    /// AVFoundation can report YouTube's fragmented files at double their length.
+    private var knownLength: Double?
     private var artwork: MPMediaItemArtwork?
     private var handledSegments = Set<String>()
     private var segmentTask: Task<Void, Never>?
@@ -316,6 +319,8 @@ final class PlayerController: ObservableObject {
         clearItemObservers()
         let expected = current?.id
         let seconds_ = seconds
+        let stated = details.map { Double($0.duration) } ?? current?.item.duration.map(Double.init)
+        knownLength = (stated ?? 0) > 0 && !(current?.item.isLive ?? false) ? (stated! + 1) : nil
         switch source {
         case .hls(let url):
             attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds_)
@@ -323,6 +328,8 @@ final class PlayerController: ObservableObject {
             let duration = details.map { Double($0.duration) }
                 ?? current.flatMap { $0.item.duration.map(Double.init) }
             loadTask = Task { [weak self] in
+                let indexed = await MediaMerge.indexedLength(of: url)
+                if let indexed { self?.knownLength = indexed }
                 let asset = await MediaMerge.asset(for: url, expected: duration)
                 guard let self, !Task.isCancelled, self.current?.id == expected else { return }
                 self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
@@ -443,7 +450,17 @@ final class PlayerController: ObservableObject {
 
     private func updateDuration(from item: AVPlayerItem) {
         let length = item.duration
-        if length.isNumeric, length.seconds > 0 { duration = length.seconds }
+        guard length.isNumeric, length.seconds > 0 else { return }
+        if let known = knownLength, known > 0, length.seconds > known * 1.5 {
+            // Doubled: show the real length and end the item there, so the queue moves on.
+            if item.forwardPlaybackEndTime != CMTime(seconds: known, preferredTimescale: 600) {
+                item.forwardPlaybackEndTime = CMTime(seconds: known, preferredTimescale: 600)
+                NSLog("[player] item reports %.1fs; using %.1fs", length.seconds, known)
+            }
+            duration = known
+        } else {
+            duration = length.seconds
+        }
     }
 
     func savePosition() {
