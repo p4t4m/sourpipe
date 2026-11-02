@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import SwiftUI
 import UIKit
 
@@ -16,6 +17,8 @@ struct PopupHost: UIViewRepresentable {
         let view = PlayerLayerView()
         view.isUserInteractionEnabled = false
         view.accessibilityElementsHidden = true
+        context.coordinator.controller = player
+        context.coordinator.onRestore = onRestore
         context.coordinator.setUp(view)
         return view
     }
@@ -23,10 +26,6 @@ struct PopupHost: UIViewRepresentable {
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         context.coordinator.controller = player
         context.coordinator.onRestore = onRestore
-        if player.popupRequested {
-            // Not during the view update: starting changes published state.
-            DispatchQueue.main.async { context.coordinator.start() }
-        }
     }
 
     final class PlayerLayerView: UIView {
@@ -44,14 +43,26 @@ struct PopupHost: UIViewRepresentable {
         private var timeout: Task<Void, Never>?
         private var active = false
 
+        private var request: AnyCancellable?
+
         func setUp(_ view: PlayerLayerView) {
             self.view = view
-            guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+            // Not inside a SwiftUI update: starting changes published state.
+            request = controller?.$popupRequested
+                .filter { $0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.start() }
+            guard AVPictureInPictureController.isPictureInPictureSupported() else {
+                NSLog("[player] popup: Picture in Picture is not supported here")
+                return
+            }
             pip = AVPictureInPictureController(playerLayer: view.playerLayer)
             pip?.delegate = self
         }
 
         func start() {
+            NSLog("[player] popup requested (controller %d, pip %d, window %d)",
+                  controller == nil ? 0 : 1, pip == nil ? 0 : 1, view?.window == nil ? 0 : 1)
             guard let controller, let pip, let view else {
                 controller?.popupRequested = false
                 return
@@ -63,6 +74,7 @@ struct PopupHost: UIViewRepresentable {
             // Possible once the item is ready and the layer has drawn a frame.
             possible = pip.observe(\.isPictureInPicturePossible, options: [.initial, .new]) {
                 [weak self] pip, _ in
+                NSLog("[player] popup possible: %d", pip.isPictureInPicturePossible ? 1 : 0)
                 guard pip.isPictureInPicturePossible else { return }
                 Task { @MainActor in self?.begin() }
             }
@@ -81,6 +93,7 @@ struct PopupHost: UIViewRepresentable {
             possible?.invalidate()
             possible = nil
             timeout?.cancel()
+            NSLog("[player] popup starting")
             pip.startPictureInPicture()
         }
 
