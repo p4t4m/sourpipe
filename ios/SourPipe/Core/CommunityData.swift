@@ -59,6 +59,9 @@ public struct SponsorBlockSettings: Codable, Equatable {
     public var modes: [String: SkipMode] = [:]
     /// Uploader names, matching the whitelist in a Tubular backup.
     public var whitelist: [String] = []
+    /// A skip button cannot be tapped in Picture in Picture or from the lock screen, so "ask"
+    /// segments are skipped there instead of playing through.
+    public var skipAskedWhenHidden = true
 
     public init() {}
 
@@ -66,13 +69,14 @@ public struct SponsorBlockSettings: Codable, Equatable {
         modes[category.rawValue] ?? category.defaultMode
     }
 
-    enum CodingKeys: CodingKey { case server, modes, whitelist }
+    enum CodingKeys: CodingKey { case server, modes, whitelist, skipAskedWhenHidden }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         server = try c.decodeIfPresent(String.self, forKey: .server) ?? Self.defaultServer
         modes = try c.decodeIfPresent([String: SkipMode].self, forKey: .modes) ?? [:]
         whitelist = try c.decodeIfPresent([String].self, forKey: .whitelist) ?? []
+        skipAskedWhenHidden = try c.decodeIfPresent(Bool.self, forKey: .skipAskedWhenHidden) ?? true
     }
 }
 
@@ -128,14 +132,17 @@ public enum SkipPlanner {
     /// `handled` holds segments already skipped or dismissed, so that seeking back into one lets
     /// the user watch it.
     public static func decide(position: Double, segments: [SponsorSegment],
-                              settings: SponsorBlockSettings, handled: Set<String>) -> Decision {
+                              settings: SponsorBlockSettings, handled: Set<String>,
+                              canShowButton: Bool = true) -> Decision {
         var offer: SponsorSegment?
         for segment in segments where !segment.isHighlight && !handled.contains(segment.uuid) {
             // The margin stops an imprecise seek from landing just before the end and repeating.
             guard position >= segment.start, position < segment.end - 0.3 else { continue }
             switch settings.mode(for: segment.category) {
             case .automatic: return .skip(segment)
-            case .offer: offer = offer ?? segment
+            case .offer:
+                if !canShowButton && settings.skipAskedWhenHidden { return .skip(segment) }
+                if canShowButton { offer = offer ?? segment }
             case .off: break
             }
         }

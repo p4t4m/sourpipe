@@ -38,6 +38,9 @@ final class PlayerController: ObservableObject {
     @Published private(set) var recentSkip: SponsorSegment?
 
     let player = AVPlayer()
+    var isInPictureInPicture = false {
+        didSet { NSLog("[player] picture in picture: %d", isInPictureInPicture ? 1 : 0) }
+    }
 
     private let store: AppStore
     private var sources: [PlaybackSource] = []
@@ -449,14 +452,25 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// False in Picture in Picture and in the background, where the skip button is out of reach.
+    private var canShowSkipButton: Bool {
+        !isInPictureInPicture && UIApplication.shared.applicationState == .active
+    }
+
     private func applySkips() {
+        #if DEBUG
+        injectTestSegments()
+        #endif
         guard !segments.isEmpty else { return }
         switch SkipPlanner.decide(position: position, segments: segments,
                                   settings: store.library.settings.sponsorBlock,
-                                  handled: handledSegments) {
+                                  handled: handledSegments, canShowButton: canShowSkipButton) {
         case .skip(let segment):
             handledSegments.insert(segment.uuid)
             offeredSkip = nil
+            NSLog("[player] skipping %@ %.1f to %.1f, at %.1f, app state %d, pip %d",
+                  segment.category.rawValue, segment.start, segment.end, position,
+                  UIApplication.shared.applicationState.rawValue, isInPictureInPicture ? 1 : 0)
             seek(to: segment.end)
             recentSkip = segment
             recentSkipTask?.cancel()
@@ -470,6 +484,21 @@ final class PlayerController: ObservableObject {
             offeredSkip = nil
         }
     }
+
+    #if DEBUG
+    /// CI cannot play YouTube, so `-testSkipAfter <seconds>` adds segments to any stream.
+    private func injectTestSegments() {
+        let delay = UserDefaults.standard.double(forKey: "testSkipAfter")
+        guard delay > 0, segments.isEmpty, handledSegments.isEmpty, position > 0 else { return }
+        segments = [
+            SponsorSegment(uuid: "test-sponsor", category: .sponsor,
+                           start: position + delay, end: position + delay + 10),
+            SponsorSegment(uuid: "test-ask", category: .selfpromo,
+                           start: position + delay + 20, end: position + delay + 30),
+        ]
+        NSLog("[player] test segments added at %.1f", position)
+    }
+    #endif
 
     func acceptOfferedSkip() {
         guard let segment = offeredSkip else { return }

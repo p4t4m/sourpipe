@@ -66,6 +66,8 @@ struct SettingsView: View {
                             if category != .highlight { Text("Skip").tag(SkipMode.automatic) }
                         }
                     }
+                    Toggle("Skip \"Ask\" segments in Picture in Picture and background",
+                           isOn: $store.library.settings.sponsorBlock.skipAskedWhenHidden)
                     TextField("Server", text: $store.library.settings.sponsorBlock.server)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

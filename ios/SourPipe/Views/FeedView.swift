@@ -1,68 +1,126 @@
 import SwiftUI
 
-/// Newest videos across subscriptions.
+/// Newest videos across subscriptions, kept on disk so that the feed opens instantly.
 @MainActor
 final class FeedModel: ObservableObject {
     @Published var isLoading = false
     @Published var completed = 0
     @Published var failed: [String] = []
+    @Published private(set) var updatedAt: Date?
     /// Per channel, so that a feed group can filter without fetching again.
-    @Published private var byChannel: [String: [InfoItem]] = [:]
+    @Published private var byChannel: [String: [InfoItem]] = [:] {
+        didSet { sortedLists = [:] }
+    }
+    private var sortedLists: [[String]?: [InfoItem]] = [:]
     private var total = 0
+    private var pending: ArraySlice<Subscription> = []
 
-    /// Requests to run at once. The services rate limit, and JS runs on one thread anyway.
-    private static let concurrency = 4
+    /// Below this, the cached feed is shown without checking again. Pull to refresh always checks.
+    private static let freshFor: TimeInterval = 30 * 60
+    /// Calls at once per engine. Above one, a second call parses while the first waits on the network.
+    private static let callsPerEngine = 2
 
-    func load(_ subscriptions: [Subscription]) async {
-        guard !isLoading else { return }
+    private struct Cache: Codable {
+        var updatedAt: Date
+        var byChannel: [String: [InfoItem]]
+    }
+
+    private nonisolated static var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("feed.json")
+    }
+
+    func loadIfNeeded(_ subscriptions: [Subscription], settings: AppSettings) async {
+        if updatedAt == nil, !isLoading {
+            let cache = await Task.detached(priority: .userInitiated) { () -> Cache? in
+                guard let data = try? Data(contentsOf: Self.cacheURL) else { return nil }
+                return try? JSONDecoder().decode(Cache.self, from: data)
+            }.value
+            if let cache {
+                byChannel = cache.byChannel
+                updatedAt = cache.updatedAt
+            }
+        }
+        let known = Set(byChannel.keys)
+        let isMissingChannels = subscriptions.contains { !known.contains($0.url) }
+        let isStale = updatedAt.map { Date().timeIntervalSince($0) > Self.freshFor } ?? true
+        if isStale || isMissingChannels { await load(subscriptions, settings: settings) }
+    }
+
+    func load(_ subscriptions: [Subscription], settings: AppSettings) async {
+        guard !isLoading, !subscriptions.isEmpty else { return }
         isLoading = true
         completed = 0
         failed = []
         total = subscriptions.count
-        byChannel = [:]
-        var pending = subscriptions[...]
-        await withTaskGroup(of: (Subscription, [InfoItem]?).self) { group in
-            for _ in 0..<Self.concurrency {
-                guard let subscription = pending.popFirst() else { break }
-                group.addTask { (subscription, try? await Self.videos(of: subscription)) }
+        pending = subscriptions[...]
+        let engines = ExtractorEngine.workers(min(subscriptions.count, 3))
+        await withTaskGroup(of: Void.self) { group in
+            for engine in engines {
+                group.addTask { await Self.prepare(engine, settings: settings) }
             }
-            for await (subscription, videos) in group {
-                completed += 1
-                if let videos {
-                    byChannel[subscription.url] = videos
-                } else {
-                    failed.append(subscription.name)
-                }
-                if let next = pending.popFirst() {
-                    group.addTask { (next, try? await Self.videos(of: next)) }
+            await group.waitForAll()
+            for engine in engines {
+                for _ in 0..<Self.callsPerEngine {
+                    group.addTask { await self.work(on: engine) }
                 }
             }
         }
+        updatedAt = Date()
         isLoading = false
+        save()
     }
 
-    private nonisolated static func videos(of subscription: Subscription) async throws -> [InfoItem] {
+    private nonisolated static func prepare(_ engine: ExtractorEngine, settings: AppSettings) async {
+        try? await Extractor.configure(language: settings.language, country: settings.country,
+                                       on: engine)
+    }
+
+    private func work(on engine: ExtractorEngine) async {
+        while let subscription = pending.popFirst() {
+            let videos = try? await Self.videos(of: subscription, on: engine)
+            completed += 1
+            if let videos {
+                // A failed channel keeps its cached videos.
+                byChannel[subscription.url] = videos
+            } else {
+                failed.append(subscription.name)
+            }
+        }
+    }
+
+    private nonisolated static func videos(of subscription: Subscription,
+                                           on engine: ExtractorEngine) async throws -> [InfoItem] {
         let channel = try await Extractor.channel(serviceId: subscription.serviceId,
-                                                  url: subscription.url)
+                                                  url: subscription.url, on: engine)
         guard let tab = channel.tabs.first(where: { $0.name == "videos" }) ?? channel.tabs.first else {
             return []
         }
-        return try await Extractor.channelTab(serviceId: subscription.serviceId, token: tab.token)
+        return try await Extractor.channelTab(serviceId: subscription.serviceId, token: tab.token,
+                                              on: engine)
             .items.filter { $0.type == .stream }
     }
 
-    /// Newest first, across the given channels or across all of them.
-    func items(in channels: [String]?) -> [InfoItem] {
-        let lists = channels.map { $0.compactMap { byChannel[$0] } } ?? Array(byChannel.values)
-        return Self.sorted(lists.flatMap { $0 })
+    private func save() {
+        guard let updatedAt else { return }
+        let cache = Cache(updatedAt: updatedAt, byChannel: byChannel)
+        Task.detached(priority: .utility) {
+            if let data = try? JSONEncoder().encode(cache) {
+                try? data.write(to: Self.cacheURL, options: .atomic)
+            }
+        }
     }
 
-    var hasItems: Bool { !byChannel.isEmpty }
-
-    private static func sorted(_ items: [InfoItem]) -> [InfoItem] {
+    /// Newest first across the given channels. Unsubscribed channels drop out because the caller
+    /// only passes current ones. Remembered, since the view asks repeatedly while rendering.
+    func items(in channels: [String]) -> [InfoItem] {
+        if let known = sortedLists[channels] { return known }
         var seen = Set<String>()
-        return items.filter { seen.insert($0.id).inserted }
+        let sorted = channels.compactMap { byChannel[$0] }.flatMap { $0 }
+            .filter { seen.insert($0.id).inserted }
             .sorted { ($0.uploadDate ?? 0) > ($1.uploadDate ?? 0) }
+        sortedLists[channels] = sorted
+        return sorted
     }
 
     var progressText: String { "Checked \(completed) of \(total) channels" }
@@ -79,7 +137,7 @@ struct FeedView: View {
     }
 
     private var visibleItems: [InfoItem] {
-        let items = model.items(in: group?.channelURLs)
+        let items = model.items(in: group?.channelURLs ?? store.library.subscriptions.map(\.url))
         return store.library.settings.hideShorts ? items.filter { $0.isShort != true } : items
     }
 
@@ -134,11 +192,11 @@ struct FeedView: View {
                 .disabled(visibleItems.isEmpty)
             }
         }
-        .refreshable { await model.load(store.library.subscriptions) }
+        .refreshable {
+            await model.load(store.library.subscriptions, settings: store.library.settings)
+        }
         .task {
-            if !model.hasItems && !store.library.subscriptions.isEmpty {
-                await model.load(store.library.subscriptions)
-            }
+            await model.loadIfNeeded(store.library.subscriptions, settings: store.library.settings)
         }
     }
 }

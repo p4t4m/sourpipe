@@ -5,8 +5,9 @@ import UIKit
 /// The system player UI: controls, AirPlay, speed menu and Picture in Picture.
 struct VideoPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
+    var onPictureInPicture: (Bool) -> Void = { _ in }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(onPictureInPicture: onPictureInPicture) }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
@@ -33,6 +34,11 @@ struct VideoPlayerView: UIViewControllerRepresentable {
         private var observers: [NSObjectProtocol] = []
         private var inPictureInPicture = false
         var detached = false
+        private let onPictureInPicture: (Bool) -> Void
+
+        init(onPictureInPicture: @escaping (Bool) -> Void) {
+            self.onPictureInPicture = onPictureInPicture
+        }
 
         func attach(_ controller: AVPlayerViewController, player: AVPlayer) {
             self.controller = controller
@@ -60,10 +66,12 @@ struct VideoPlayerView: UIViewControllerRepresentable {
 
         func playerViewControllerWillStartPictureInPicture(_ c: AVPlayerViewController) {
             inPictureInPicture = true
+            onPictureInPicture(true)
         }
 
         func playerViewControllerDidStopPictureInPicture(_ c: AVPlayerViewController) {
             inPictureInPicture = false
+            onPictureInPicture(false)
         }
     }
 }

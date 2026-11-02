@@ -52,12 +52,13 @@ jobs:
                   print(d['udid']); raise SystemExit")"
           # YouTube refuses data-center addresses, so CI plays from services that do not.
           capture() {
+            name="$1"; link="$2"; shift 2
             xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
-            xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$2"
+            xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$link" "$@"
             sleep 35
-            xcrun simctl io "$device" screenshot "$1-1.png"
+            xcrun simctl io "$device" screenshot "$name-1.png"
             sleep 12
-            xcrun simctl io "$device" screenshot "$1-2.png"
+            xcrun simctl io "$device" screenshot "$name-2.png"
           }
           ccc="$(curl -fsS https://api.media.ccc.de/public/events/recent | python3 -c "
           import json,sys
@@ -66,10 +67,17 @@ jobs:
           import json,sys
           print(json.load(sys.stdin)['data'][0]['url'])")"
           echo "Testing $ccc and $peertube"
-          capture mediaccc "$ccc"
+          capture mediaccc "$ccc" -testDislikeVideoID aqz-KE-bpKQ
           capture peertube "$peertube"
-          xcrun simctl spawn "$device" log show --last 4m --style compact \
-            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]"' > player.log || true
+          # Skipping while backgrounded, which also starts Picture in Picture where available.
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$peertube" -testSkipAfter 25
+          sleep 15
+          xcrun simctl launch "$device" com.apple.Preferences
+          sleep 60
+          xcrun simctl io "$device" screenshot background.png
+          xcrun simctl spawn "$device" log show --last 6m --style compact \
+            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]" OR eventMessage CONTAINS "[dislikes]"' > player.log || true
           cat player.log
       - uses: actions/upload-artifact@v4
         if: always()

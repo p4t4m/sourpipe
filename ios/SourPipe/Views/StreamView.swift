@@ -90,7 +90,9 @@ struct StreamView: View {
                         Thumbnail(url: artworkURL).opacity(0.5)
                         audioControls
                     } else {
-                        VideoPlayerView(player: player.player)
+                        VideoPlayerView(player: player.player) { active in
+                            player.isInPictureInPicture = active
+                        }
                     }
                     if player.state == .loading {
                         ProgressView().tint(.white)
@@ -178,6 +180,10 @@ struct StreamDetailsSection: View {
             Text(details.name).font(.headline)
             Text(statistics).font(.caption).foregroundColor(.secondary)
         }
+        // On a row that really renders: a List never shows an EmptyView, whose task would not run.
+        .task(id: "\(details.url)/\(store.library.settings.dislikesEnabled)") {
+            await loadDislikes()
+        }
         actionRow
         uploaderRow
         sponsorBlockRows
@@ -217,14 +223,20 @@ struct StreamDetailsSection: View {
         case .queue:
             QueueSection()
         }
-        EmptyView()
-            .task(id: details.url) {
-                let settings = store.library.settings
-                guard settings.dislikesEnabled, details.serviceId == 0,
-                      let videoID = details.id else { return }
-                dislikes = await CommunityServices.dislikes(videoID: videoID,
-                                                            server: settings.dislikesServer)
-            }
+    }
+
+    private func loadDislikes() async {
+        let settings = store.library.settings
+        var videoID = settings.dislikesEnabled && details.serviceId == 0 ? details.id : nil
+        #if DEBUG
+        // CI cannot open YouTube videos, so it borrows a known ID on another service's page.
+        videoID = UserDefaults.standard.string(forKey: "testDislikeVideoID") ?? videoID
+        #endif
+        guard let videoID else {
+            dislikes = nil
+            return
+        }
+        dislikes = await CommunityServices.dislikes(videoID: videoID, server: settings.dislikesServer)
     }
 
     @ViewBuilder private var sponsorBlockRows: some View {

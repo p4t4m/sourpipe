@@ -202,6 +202,16 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(decide(15, ["s"]), .none, "seeking back lets the user watch it")
         XCTAssertEqual(decide(35), .offer(promo))
         XCTAssertEqual(decide(50), .none, "highlights are jumped to, never skipped")
+
+        func hidden(_ at: Double) -> SkipPlanner.Decision {
+            SkipPlanner.decide(position: at, segments: all, settings: settings, handled: [],
+                               canShowButton: false)
+        }
+        XCTAssertEqual(hidden(35), .skip(promo), "no button can be tapped in Picture in Picture")
+        XCTAssertEqual(hidden(15), .skip(sponsor))
+        XCTAssertEqual(hidden(2), .none, "categories switched off stay off")
+        settings.skipAskedWhenHidden = false
+        XCTAssertEqual(hidden(35), .none, "plays through, with no button to offer")
     }
 
     func testDislikeResponse() throws {

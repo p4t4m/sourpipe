@@ -6,7 +6,21 @@ import JavaScriptCore
 /// All JavaScript runs on one thread with a large stack, because JavaScriptCore has no JIT in
 /// third-party iOS apps and interpreted frames are big; secondary threads default to 512 KB.
 final class ExtractorEngine: NSObject {
-    static let shared = ExtractorEngine()
+    static let shared = ExtractorEngine(name: "SourPipe.Extractor")
+
+    /// JavaScript is single threaded and parsing dominates the cost of a request, so real speed-ups
+    /// need more engines rather than more concurrent calls. These serve bulk work, leaving `shared`
+    /// free for the screen in front of the user. Created on first use and kept for the app's life.
+    @MainActor static func workers(_ count: Int) -> [ExtractorEngine] {
+        while workerPool.count < min(count, maxWorkers) {
+            workerPool.append(ExtractorEngine(name: "SourPipe.Worker\(workerPool.count)"))
+        }
+        return Array(workerPool.prefix(count))
+    }
+
+    @MainActor private static var workerPool: [ExtractorEngine] = []
+    /// Each engine holds its own copy of the extractor in memory.
+    private static let maxWorkers = 3
 
     /// NewPipe's own downloader uses this as its default, so services see the same client.
     private static let userAgent =
@@ -23,7 +37,7 @@ final class ExtractorEngine: NSObject {
         init(_ run: @escaping () -> Void) { self.run = run }
     }
 
-    override private init() {
+    private init(name: String) {
         let configuration = URLSessionConfiguration.ephemeral
         // The extractor manages its own Cookie headers; URLSession's handling would replace them.
         configuration.httpCookieStorage = nil
@@ -34,7 +48,7 @@ final class ExtractorEngine: NSObject {
         super.init()
         let started = DispatchSemaphore(value: 0)
         thread = Thread { [unowned self] in self.threadMain(started) }
-        thread.name = "SourPipe.Extractor"
+        thread.name = name
         thread.stackSize = 16 << 20
         thread.qualityOfService = .userInitiated
         thread.start()
@@ -61,7 +75,8 @@ final class ExtractorEngine: NSObject {
     }
 
     private func loadBundle() {
-        guard let context = JSContext(),
+        // A virtual machine of its own: contexts sharing one would take turns on a single lock.
+        guard let context = JSContext(virtualMachine: JSVirtualMachine()),
               let url = Bundle.main.url(forResource: "extractor", withExtension: "jsbundle"),
               let source = try? String(contentsOf: url, encoding: .utf8) else {
             fatalError("extractor.jsbundle is missing from the app bundle; see README")
@@ -202,8 +217,9 @@ final class ExtractorEngine: NSObject {
 
 /// Typed access to the bridge. Any thread; results are plain values.
 enum Extractor {
-    private static func call<T: Decodable>(_ method: String, _ args: [String: Any] = [:]) async throws -> T {
-        let data = try await ExtractorEngine.shared.call(method, args: args)
+    private static func call<T: Decodable>(_ method: String, _ args: [String: Any] = [:],
+                                           on engine: ExtractorEngine = .shared) async throws -> T {
+        let data = try await engine.call(method, args: args)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
@@ -213,8 +229,10 @@ enum Extractor {
         try JSONSerialization.jsonObject(with: JSONEncoder().encode(page))
     }
 
-    static func configure(language: String, country: String) async throws {
-        let _: Empty = try await call("configure", ["language": language, "country": country])
+    static func configure(language: String, country: String,
+                          on engine: ExtractorEngine = .shared) async throws {
+        let _: Empty = try await call("configure", ["language": language, "country": country],
+                                      on: engine)
     }
 
     static func services() async throws -> [ServiceInfo] {
@@ -242,12 +260,15 @@ enum Extractor {
         try await call("kiosk", ["serviceId": serviceId, "id": id])
     }
 
-    static func channel(serviceId: Int, url: String) async throws -> ChannelDetails {
-        try await call("channel", ["serviceId": serviceId, "url": url])
+    static func channel(serviceId: Int, url: String,
+                        on engine: ExtractorEngine = .shared) async throws -> ChannelDetails {
+        try await call("channel", ["serviceId": serviceId, "url": url], on: engine)
     }
 
-    static func channelTab(serviceId: Int, token: String) async throws -> ItemPage {
-        try await call("channelTab", ["serviceId": serviceId, "token": token])
+    /// Tab tokens belong to the engine that loaded the channel, so pass the same one.
+    static func channelTab(serviceId: Int, token: String,
+                           on engine: ExtractorEngine = .shared) async throws -> ItemPage {
+        try await call("channelTab", ["serviceId": serviceId, "token": token], on: engine)
     }
 
     static func playlist(serviceId: Int, url: String) async throws -> PlaylistDetails {
