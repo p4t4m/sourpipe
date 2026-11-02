@@ -114,10 +114,8 @@ or later.
 
 ### Without a Mac
 
-Each change to `main` builds an unsigned IPA. Open the newest successful run of the
-[iOS workflow](https://github.com/p4t4m/sourpipe/actions/workflows/ios.yml) and download the
-`SourPipe-unsigned-ipa` artifact (GitHub requires signing in, and keeps artifacts for 90 days). Then
-sign and install it with a sideloading tool:
+Download `SourPipe-unsigned.ipa` from the [latest release](https://github.com/p4t4m/sourpipe/releases/latest),
+then sign and install it with a sideloading tool:
 
 - **Windows or macOS:** [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io).
 - **Linux:** those projects have no official Linux tool. Community tools exist, or use a Windows
