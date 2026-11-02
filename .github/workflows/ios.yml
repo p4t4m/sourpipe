@@ -50,14 +50,25 @@ jobs:
           for devices in json.load(sys.stdin)['devices'].values():
               for d in devices:
                   print(d['udid']); raise SystemExit")"
-          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
-          xcrun simctl launch "$device" app.sourpipe.SourPipe \
-            -openLink "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
-          sleep 40
-          xcrun simctl io "$device" screenshot playing-1.png
-          sleep 15
-          xcrun simctl io "$device" screenshot playing-2.png
-          xcrun simctl spawn "$device" log show --last 3m --style compact \
+          # YouTube refuses data-center addresses, so CI plays from services that do not.
+          capture() {
+            xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+            xcrun simctl launch "$device" app.sourpipe.SourPipe -openLink "$2"
+            sleep 35
+            xcrun simctl io "$device" screenshot "$1-1.png"
+            sleep 12
+            xcrun simctl io "$device" screenshot "$1-2.png"
+          }
+          ccc="$(curl -fsS https://api.media.ccc.de/public/events/recent | python3 -c "
+          import json,sys
+          print(json.load(sys.stdin)['events'][0]['frontend_link'])")"
+          peertube="$(curl -fsS 'https://framatube.org/api/v1/videos?count=1&sort=-publishedAt&isLocal=true' | python3 -c "
+          import json,sys
+          print(json.load(sys.stdin)['data'][0]['url'])")"
+          echo "Testing $ccc and $peertube"
+          capture mediaccc "$ccc"
+          capture peertube "$peertube"
+          xcrun simctl spawn "$device" log show --last 4m --style compact \
             --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]"' > player.log || true
           cat player.log
       - uses: actions/upload-artifact@v4

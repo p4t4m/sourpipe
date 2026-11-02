@@ -292,6 +292,9 @@ public struct ExtractorFailure: Error, Codable, LocalizedError {
         case "recaptcha":
             return "The service is rate limiting this network (CAPTCHA requested). "
                 + "Try again later or on another network."
+        case "botCheck":
+            return "YouTube is refusing anonymous playback from this network. "
+                + "Try again later or on another network."
         case "ageRestricted": return "This content is age restricted."
         case "geoRestricted": return "This content is not available in your country."
         case "paid": return "This content must be purchased."

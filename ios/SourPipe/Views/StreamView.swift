@@ -13,6 +13,12 @@ struct StreamView: View {
 
     private var isCurrent: Bool { player.isCurrent(url: item.url) }
 
+    /// The player area shows this failure, so the list below must not keep spinning.
+    private var hasFailed: Bool {
+        if isCurrent, case .failed = player.state { return true }
+        return false
+    }
+
     /// What is on screen: the player's copy while this stream is playing.
     private var details: StreamDetails? {
         if isCurrent, let playing = player.details { return playing }
@@ -29,7 +35,7 @@ struct StreamView: View {
                     StatusView(title: "Could not load this stream", message: error) {
                         Task { await load() }
                     }
-                } else {
+                } else if !hasFailed {
                     HStack {
                         Spacer()
                         ProgressView()

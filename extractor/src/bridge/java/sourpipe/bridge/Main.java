@@ -20,6 +20,7 @@ import org.schabi.newpipe.extractor.exceptions.GeographicRestrictionException;
 import org.schabi.newpipe.extractor.exceptions.PaidContentException;
 import org.schabi.newpipe.extractor.exceptions.PrivateContentException;
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException;
+import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException;
 import org.schabi.newpipe.extractor.kiosk.KioskExtractor;
 import org.schabi.newpipe.extractor.kiosk.KioskInfo;
 import org.schabi.newpipe.extractor.kiosk.KioskList;
@@ -82,6 +83,8 @@ public final class Main {
         final String kind;
         if (t instanceof ReCaptchaException) {
             kind = "recaptcha";
+        } else if (t instanceof SignInConfirmNotBotException) {
+            kind = "botCheck";
         } else if (t instanceof AgeRestrictedContentException) {
             kind = "ageRestricted";
         } else if (t instanceof GeographicRestrictionException) {
