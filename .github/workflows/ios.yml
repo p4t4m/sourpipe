@@ -1,11 +1,9 @@
 name: iOS
-# macOS runners cost ten times the free minutes of Linux ones, so this runs only for main, pull
-# requests and by hand (Actions > iOS > Run workflow), and not for documentation-only changes.
+# Runs only for pushes to main and by hand (Actions > iOS > Run workflow), both of which need write
+# access, so nobody outside the repository can start it. Documentation-only changes are skipped.
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "screenshots/**", "LICENSE"]
-  pull_request:
     paths-ignore: ["**.md", "screenshots/**", "LICENSE"]
   workflow_dispatch:
 
