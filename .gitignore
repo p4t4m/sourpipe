@@ -1,0 +1,17 @@
+# Local toolchains and the working checkout of NewPipeExtractor
+.tools/
+vendor/NewPipeExtractor/
+
+# Gradle
+.gradle/
+build/
+
+# Xcode / Swift
+DerivedData/
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+
+# OS
+.DS_Store

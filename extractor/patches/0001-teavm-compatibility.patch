@@ -1,0 +1,106 @@
+diff --git a/extractor/src/main/java/org/schabi/newpipe/extractor/localization/Localization.java b/extractor/src/main/java/org/schabi/newpipe/extractor/localization/Localization.java
+index 5727150fe..608468763 100644
+--- a/extractor/src/main/java/org/schabi/newpipe/extractor/localization/Localization.java
++++ b/extractor/src/main/java/org/schabi/newpipe/extractor/localization/Localization.java
+@@ -121,14 +121,10 @@ public class Localization implements Serializable {
+      */
+     public static Locale getLocaleFromThreeLetterCode(@Nonnull final String code)
+             throws ParsingException {
+-        final String[] languages = Locale.getISOLanguages();
+-        final Map<String, Locale> localeMap = new HashMap<>(languages.length);
+-        for (final String language : languages) {
+-            final Locale locale = new Locale(language);
+-            localeMap.put(locale.getISO3Language(), locale);
+-        }
+-        if (localeMap.containsKey(code)) {
+-            return localeMap.get(code);
++        // SourPipe: TeaVM's Locale lacks getISOLanguages() and getISO3Language().
++        final Locale locale = Iso639.fromThreeLetterCode(code);
++        if (locale != null) {
++            return locale;
+         } else {
+             throw new ParsingException(
+                     "Could not get Locale from this three letter language code" + code);
+diff --git a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScript.java b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScript.java
+index c21790014..93b82f058 100644
+--- a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScript.java
++++ b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScript.java
+@@ -1,9 +1,5 @@
+ package org.schabi.newpipe.extractor.utils;
+ 
+-import org.mozilla.javascript.Context;
+-import org.mozilla.javascript.Function;
+-import org.mozilla.javascript.ScriptableObject;
+-
+ import javax.annotation.Nullable;
+ 
+ public final class JavaScript {
+@@ -14,30 +10,21 @@ public final class JavaScript {
+     }
+ 
+     public static void compileOrThrow(final String function) {
+-        try (Context context = Context.enter()) {
+-            context.setInterpretedMode(true);
+-
+-            // If it doesn't compile it throws an exception here
+-            context.compileString(function, null, 1, null);
+-        }
++        // SourPipe: Rhino is replaced by the host's JavaScriptCore.
++        requireInterpreter().compile(function);
+     }
+ 
+     public static String run(final String function,
+                              final String functionName,
+                              final String... parameters) {
+-        if (externalJavaScriptInterpreter != null) {
+-            return externalJavaScriptInterpreter.run(function, functionName, parameters);
+-        }
+-
+-        try (Context context = Context.enter()) {
+-            context.setInterpretedMode(true);
+-            final ScriptableObject scope = context.initSafeStandardObjects();
++        return requireInterpreter().run(function, functionName, parameters);
++    }
+ 
+-            context.evaluateString(scope, function, functionName, 1, null);
+-            final Function jsFunction = (Function) scope.get(functionName, scope);
+-            final Object result = jsFunction.call(context, scope, scope, parameters);
+-            return result.toString();
++    private static JavaScriptInterpreter requireInterpreter() {
++        if (externalJavaScriptInterpreter == null) {
++            throw new IllegalStateException("No JavaScript interpreter was set");
+         }
++        return externalJavaScriptInterpreter;
+     }
+ 
+     /**
+diff --git a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScriptInterpreter.java b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScriptInterpreter.java
+index e117ba8da..95b818d34 100644
+--- a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScriptInterpreter.java
++++ b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/JavaScriptInterpreter.java
+@@ -20,5 +20,11 @@ public interface JavaScriptInterpreter {
+      * @return the result of the run function
+      */
+     String run(@Nonnull String code, @Nonnull String functionName, String... parameters);
+-}
+ 
++    /**
++     * Throws if the code does not compile. Added by SourPipe, as Rhino was removed.
++     *
++     * @param code the code to compile
++     */
++    void compile(@Nonnull String code);
++}
+diff --git a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/jsextractor/EcmaScriptTokenStream.java b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/jsextractor/EcmaScriptTokenStream.java
+index 0cd5169dc..bfc4fe904 100644
+--- a/extractor/src/main/java/org/schabi/newpipe/extractor/utils/jsextractor/EcmaScriptTokenStream.java
++++ b/extractor/src/main/java/org/schabi/newpipe/extractor/utils/jsextractor/EcmaScriptTokenStream.java
+@@ -8,8 +8,6 @@
+  */
+ package org.schabi.newpipe.extractor.utils.jsextractor;
+ 
+-import org.mozilla.javascript.Kit;
+-import org.mozilla.javascript.ScriptRuntime;
+ import org.schabi.newpipe.extractor.exceptions.ParsingException;
+ 
+ /**

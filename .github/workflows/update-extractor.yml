@@ -1,0 +1,52 @@
+name: Update NewPipeExtractor
+# Weekly, or by hand: moves to upstream's dev tip, rebuilds the bundle, runs the live tests and
+# opens a pull request. A patch conflict fails the job, which is the signal to update by hand.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: oven-sh/setup-bun@v2
+      - name: Update and test
+        id: update
+        # CI addresses are often blocked by the services, so a test failure is reported on the
+        # pull request instead of stopping it. Build and patch failures still stop the job.
+        run: |
+          set +e
+          scripts/update-extractor.sh > update.log 2>&1
+          code=$?
+          cat update.log
+          if ! grep -qE 'PASS|FAIL' update.log; then exit "$code"; fi
+          { echo 'report<<REPORT'; grep -E '^(PASS|FAIL|ALL PASSED|[0-9]+ FAILED)' update.log | cut -c1-200; echo REPORT; } >> "$GITHUB_OUTPUT"
+          rm update.log
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.update.outputs.report }}
+        run: |
+          if git diff --quiet; then echo "Already current."; exit 0; fi
+          branch="update-extractor-$(cut -c1-9 extractor/upstream.lock)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add extractor/upstream.lock extractor/patches ios/SourPipe/Resources
+          git commit -m "Update NewPipeExtractor to $(cut -c1-9 extractor/upstream.lock)"
+          git push --force origin "$branch"
+          gh pr create --fill --body "Live test results from CI:
+
+          \`\`\`
+          $REPORT
+          \`\`\`" || true

@@ -1,0 +1,49 @@
+name: iOS
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the platform-neutral core
+        working-directory: ios
+        run: swift test
+
+  simulator-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for the simulator
+        working-directory: ios
+        run: |
+          xcodebuild -project SourPipe.xcodeproj -scheme SourPipe -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Launch in a simulator and take a screenshot
+        working-directory: ios
+        run: |
+          device="$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          for runtime, devices in json.load(sys.stdin)['devices'].items():
+              if 'iOS' in runtime:
+                  for d in devices:
+                      if d['name'].startswith('iPhone'):
+                          print(d['udid']); raise SystemExit")"
+          xcrun simctl boot "$device"
+          xcrun simctl install "$device" build/Build/Products/Debug-iphonesimulator/SourPipe.app
+          xcrun simctl launch "$device" app.sourpipe.SourPipe
+          # Long enough for the extractor to start and the first list to load over the network.
+          sleep 45
+          xcrun simctl io "$device" screenshot home.png
+          # launch only reports start-up; a crash since then leaves the app absent from this list.
+          xcrun simctl spawn "$device" launchctl list | grep -q app.sourpipe.SourPipe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-screenshot
+          path: ios/home.png
+          if-no-files-found: warn
