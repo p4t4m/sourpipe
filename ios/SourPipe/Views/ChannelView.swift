@@ -12,6 +12,7 @@ struct ChannelView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if let channel {
                 header(channel)
                 if channel.tabs.count > 1 {
@@ -24,6 +25,9 @@ struct ChannelView: View {
                 StatusView(title: "Could not load this channel", message: error) {
                     Task { await load() }
                 }
+            }
+            if model.items.contains(where: { $0.type == .stream }) {
+                PlayAllButtons(items: model.items)
             }
             if let tabError = model.error {
                 Text(tabError).font(.footnote).foregroundColor(.secondary)

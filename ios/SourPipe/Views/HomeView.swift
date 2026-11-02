@@ -16,17 +16,92 @@ struct ServiceMenu: View {
     }
 }
 
+/// The sections chosen in Settings > Home sections, as tabs across the top, like NewPipe's main page.
 struct HomeView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var selection: HomePage?
+
+    private var pages: [HomePage] {
+        let pages = store.library.settings.homePages
+        return pages.isEmpty ? HomePage.defaults : pages
+    }
+
+    private var current: HomePage {
+        if let selection, pages.contains(selection) { return selection }
+        return pages[0]
+    }
+
+    var body: some View {
+        page(current)
+            .id(current)
+            // The tabs are the first row of each section's list, so they scroll with the title.
+            .environment(\.homeTabs, pages.count > 1 ? HomeTabs(
+                pages: pages, current: current,
+                titles: Dictionary(pages.map { ($0, store.title(of: $0)) },
+                                   uniquingKeysWith: { first, _ in first }),
+                select: { selection = $0 }) : nil)
+    }
+
+    @ViewBuilder private func page(_ page: HomePage) -> some View {
+        switch page {
+        case .serviceSections:
+            KioskPage(fixed: nil)
+        case .kiosk(let serviceId, let id):
+            KioskPage(fixed: (serviceId, id))
+        case .feed:
+            FeedView()
+        case .subscriptions:
+            SubscriptionsView()
+        case .bookmarks:
+            BookmarksView()
+        case .history:
+            HistoryView()
+        case .channel(let serviceId, let url, let name):
+            ChannelView(serviceId: serviceId, url: url, name: name)
+        case .playlist(let serviceId, let url, let name):
+            PlaylistView(serviceId: serviceId, url: url, name: name)
+        }
+    }
+}
+
+extension AppStore {
+    func title(of page: HomePage) -> String {
+        switch page {
+        case .serviceSections: return currentService?.name ?? "Sections"
+        case .kiosk(let serviceId, let id):
+            let service = services.first { $0.id == serviceId }?.name
+            let kiosk = Format.kioskTitle(id)
+            return service.map { serviceId == library.settings.serviceId ? kiosk : "\($0): \(kiosk)" }
+                ?? kiosk
+        case .feed: return "What's new"
+        case .subscriptions: return "Subscriptions"
+        case .bookmarks: return "Bookmarks"
+        case .history: return "History"
+        case .channel(_, _, let name): return name.isEmpty ? "Channel" : name
+        case .playlist(_, _, let name): return name.isEmpty ? "Playlist" : name
+        }
+    }
+}
+
+/// A service's sections. With `fixed`, one section of one service; otherwise the selected
+/// service's sections with a picker.
+struct KioskPage: View {
+    let fixed: (serviceId: Int, id: String)?
     @EnvironmentObject private var store: AppStore
     @StateObject private var model = ItemListModel()
     @State private var kiosk: String?
 
-    private var service: ServiceInfo? { store.currentService }
-    private var selectedKiosk: String? { kiosk ?? service?.defaultKiosk }
+    private var service: ServiceInfo? {
+        if let fixed { return store.services.first { $0.id == fixed.serviceId } }
+        return store.currentService
+    }
+
+    private var selectedKiosk: String? { fixed?.id ?? kiosk ?? service?.defaultKiosk }
 
     var body: some View {
         List {
-            if let kiosks = service?.kiosks, kiosks.count > 1 {
+            HomeTabsSlot()
+            if fixed == nil, let kiosks = service?.kiosks, kiosks.count > 1 {
                 Picker("Section", selection: Binding(
                     get: { selectedKiosk ?? "" },
                     set: { kiosk = $0 }
@@ -47,17 +122,90 @@ struct HomeView: View {
         }
         .navigationTitle(selectedKiosk.map(Format.kioskTitle) ?? "Home")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) { ServiceMenu() }
+            if fixed == nil {
+                ToolbarItem(placement: .primaryAction) { ServiceMenu() }
+            }
         }
         .refreshable { await load() }
-        .task(id: "\(store.library.settings.serviceId)/\(selectedKiosk ?? "")") { await load() }
+        .task(id: "\(service?.id ?? -1)/\(selectedKiosk ?? "")") { await load() }
         .onChange(of: store.library.settings.serviceId) { _ in kiosk = nil }
     }
 
     private func load() async {
-        guard let service, let id = selectedKiosk else { return }
+        guard let service, let id = selectedKiosk, service.kiosks.contains(id) else { return }
         await model.load(serviceId: service.id, source: nil) {
             try await Extractor.kiosk(serviceId: service.id, id: id)
+        }
+    }
+}
+
+struct BookmarksView: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        List {
+            HomeTabsSlot()
+            ForEach(store.library.savedPlaylists) { LinkedItemRow(item: $0) }
+                .onDelete { store.library.savedPlaylists.remove(atOffsets: $0) }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Bookmarks")
+        .overlay {
+            if store.library.savedPlaylists.isEmpty {
+                Text("No bookmarked playlists").foregroundColor(.secondary)
+            }
+        }
+    }
+}
+
+struct HomeTabs {
+    let pages: [HomePage]
+    let current: HomePage
+    let titles: [HomePage: String]
+    let select: (HomePage) -> Void
+}
+
+private struct HomeTabsKey: EnvironmentKey {
+    static let defaultValue: HomeTabs? = nil
+}
+
+extension EnvironmentValues {
+    var homeTabs: HomeTabs? {
+        get { self[HomeTabsKey.self] }
+        set { self[HomeTabsKey.self] = newValue }
+    }
+}
+
+/// Home's section tabs, shown as a list's first row when the list is on Home; empty elsewhere.
+struct HomeTabsSlot: View {
+    @Environment(\.homeTabs) private var tabs
+
+    var body: some View {
+        if let tabs {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tabs.pages) { page in
+                        let selected = page == tabs.current
+                        Button {
+                            tabs.select(page)
+                        } label: {
+                            Text(tabs.titles[page] ?? "")
+                                .font(.footnote.weight(selected ? .semibold : .regular))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selected ? Color.accentColor.opacity(0.2)
+                                                     : Color.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
     }
 }

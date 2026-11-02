@@ -4,6 +4,13 @@ import MediaPlayer
 import UIKit
 
 /// The single app-wide player: a queue, source fallback, background audio and lock-screen controls.
+/// The playback time, kept apart from PlayerController so that only the views showing it redraw.
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published fileprivate(set) var position: Double = 0
+    @Published fileprivate(set) var duration: Double = 0
+}
+
 @MainActor
 final class PlayerController: ObservableObject {
     enum State: Equatable {
@@ -11,6 +18,12 @@ final class PlayerController: ObservableObject {
         case loading
         case ready
         case failed(String)
+    }
+
+    /// NewPipe's three players: the main one, audio only in the background, and the popup,
+    /// which on iOS is Picture in Picture.
+    enum PlayMode {
+        case normal, background, popup
     }
 
     struct QueueEntry: Identifiable, Equatable {
@@ -28,14 +41,40 @@ final class PlayerController: ObservableObject {
     @Published private(set) var details: StreamDetails?
     @Published private(set) var isPlaying = false
     @Published private(set) var sourceLabel = ""
-    @Published private(set) var position: Double = 0
-    @Published private(set) var duration: Double = 0
+    /// Changes twice a second, so it is not published here: every view watching the player would
+    /// redraw. Views that show the time watch `clock` instead.
+    private(set) var position: Double = 0 {
+        didSet { if clock.position != position { clock.position = position } }
+    }
+    private(set) var duration: Double = 0 {
+        didSet { if clock.duration != duration { clock.duration = duration } }
+    }
+    let clock = PlaybackClock()
     @Published private(set) var isAudioOnly = false
     @Published private(set) var segments: [SponsorSegment] = []
     /// A segment the user can skip with a button.
     @Published private(set) var offeredSkip: SponsorSegment?
     /// The segment just skipped automatically, shown briefly with an undo.
     @Published private(set) var recentSkip: SponsorSegment?
+
+    /// Set when playback should move into Picture in Picture; PopupHost starts it and clears it.
+    @Published var popupRequested = false
+    /// Set to ask PopupHost to end the popup, so that only one player shows the video.
+    @Published var popupCloseRequested = false
+    /// Playing in the popup now. The video page shows a placeholder instead of a second copy.
+    @Published private(set) var isInPopup = false
+
+    func popupDidChange(_ active: Bool) {
+        isInPopup = active
+        isInPictureInPicture = active
+    }
+
+    /// NewPipe moves a video back from the popup when the main player opens; so does this.
+    func closePopup() {
+        if isInPopup { popupCloseRequested = true }
+    }
+
+    var isPlayingDownload: Bool { current?.localFile != nil }
 
     let player = AVPlayer()
     var isInPictureInPicture = false {
@@ -51,6 +90,9 @@ final class PlayerController: ObservableObject {
     private var timeObserver: Any?
     private var rateObserver: NSKeyValueObservation?
     private var lastSavedPosition: Double = 0
+    /// The real length when known: from a fragmented file's index, else the service's figure.
+    /// AVFoundation can report YouTube's fragmented files at double their length.
+    private var knownLength: Double?
     private var artwork: MPMediaItemArtwork?
     private var handledSegments = Set<String>()
     private var segmentTask: Task<Void, Never>?
@@ -69,8 +111,10 @@ final class PlayerController: ObservableObject {
         rateObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             let playing = player.timeControlStatus != .paused
             Task { @MainActor in
-                self?.isPlaying = playing
-                self?.updateNowPlaying()
+                guard let self, self.isPlaying != playing else { return }
+                self.isPlaying = playing
+                if !playing { self.savePosition() }
+                self.updateNowPlaying()
             }
         }
         timeObserver = player.addPeriodicTimeObserver(
@@ -82,16 +126,26 @@ final class PlayerController: ObservableObject {
 
     // MARK: Queue
 
-    func play(_ item: InfoItem) {
-        setQueue([QueueEntry(item: item)], start: 0)
+    func play(_ item: InfoItem, mode: PlayMode = .normal) {
+        play([item], startingAt: 0, mode: mode)
     }
 
-    func play(_ items: [InfoItem], startingAt start: Int) {
-        setQueue(items.filter { $0.type == .stream }.map { QueueEntry(item: $0) }, start: start)
+    func play(_ items: [InfoItem], startingAt start: Int, mode: PlayMode = .normal) {
+        let entries = items.filter { $0.type == .stream }.map { QueueEntry(item: $0) }
+        guard !entries.isEmpty else { return }
+        switch mode {
+        case .normal: isAudioOnly = store.library.settings.audioOnly
+        case .background: isAudioOnly = true
+        case .popup: isAudioOnly = false
+        }
+        setQueue(entries, start: start)
+        popupRequested = mode == .popup
     }
 
     func playDownload(_ record: DownloadRecord) {
         let file = AppStore.documents.appendingPathComponent(record.fileName)
+        // An audio file gets the artwork and the app's own controls.
+        isAudioOnly = record.isAudio
         setQueue([QueueEntry(item: record.item, localFile: file)], start: 0)
     }
 
@@ -279,44 +333,38 @@ final class PlayerController: ObservableObject {
         }
         sourceLabel = source.label
         clearItemObservers()
+        let expected = current?.id
+        let seconds_ = seconds
+        let stated = details.map { Double($0.duration) } ?? current?.item.duration.map(Double.init)
+        knownLength = (stated ?? 0) > 0 && !(current?.item.isLive ?? false) ? (stated! + 1) : nil
         switch source {
-        case .hls(let url), .file(let url, _):
-            attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds)
+        case .hls(let url):
+            attach(AVPlayerItem(asset: AVURLAsset(url: url)), resumeAt: seconds_)
+        case .file(let url, _):
+            let duration = details.map { Double($0.duration) }
+                ?? current.flatMap { $0.item.duration.map(Double.init) }
+            loadTask = Task { [weak self] in
+                let indexed = await MediaMerge.indexedLength(of: url)
+                if let indexed { self?.knownLength = indexed }
+                let asset = await MediaMerge.asset(for: url, expected: duration)
+                guard let self, !Task.isCancelled, self.current?.id == expected else { return }
+                self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
+            }
         case .merged(let video, let audio, _):
-            let expected = current?.id
+            let duration = details.map { Double($0.duration) }
             loadTask = Task { [weak self] in
                 do {
-                    let asset = try await Self.mergedAsset(video: video, audio: audio)
+                    let asset = try await MediaMerge.composition(video: video, audio: audio,
+                                                                 expected: duration)
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
-                    self.attach(AVPlayerItem(asset: asset), resumeAt: seconds)
+                    self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
                 } catch {
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
                     NSLog("[player] merge failed: %@", error.localizedDescription)
-                    self.tryNextSource(resumeAt: seconds)
+                    self.tryNextSource(resumeAt: seconds_)
                 }
             }
         }
-    }
-
-    nonisolated private static func mergedAsset(video: URL, audio: URL) async throws -> AVMutableComposition {
-        let composition = AVMutableComposition()
-        let videoAsset = AVURLAsset(url: video)
-        let audioAsset = AVURLAsset(url: audio)
-        guard let videoTrack = try await videoAsset.loadTracks(withMediaType: .video).first,
-              let audioTrack = try await audioAsset.loadTracks(withMediaType: .audio).first else {
-            throw ExtractorFailure(kind: "unsupported", message: "Stream has no usable track")
-        }
-        let length = try await videoAsset.load(.duration)
-        let range = CMTimeRange(start: .zero, duration: length)
-        let audioRange = CMTimeRange(start: .zero,
-                                     duration: min(length, try await audioAsset.load(.duration)))
-        try composition.addMutableTrack(withMediaType: .video,
-                                        preferredTrackID: kCMPersistentTrackID_Invalid)?
-            .insertTimeRange(range, of: videoTrack, at: .zero)
-        try composition.addMutableTrack(withMediaType: .audio,
-                                        preferredTrackID: kCMPersistentTrackID_Invalid)?
-            .insertTimeRange(audioRange, of: audioTrack, at: .zero)
-        return composition
     }
 
     private func attach(_ item: AVPlayerItem, resumeAt seconds: Double) {
@@ -413,12 +461,29 @@ final class PlayerController: ObservableObject {
         position = time.seconds
         applySkips()
         if let item = player.currentItem { updateDuration(from: item) }
-        if abs(position - lastSavedPosition) >= 10 { savePosition() }
+        // Each save redraws library views and rewrites the library file; pausing, stopping,
+        // changing video and leaving the app also save.
+        if abs(position - lastSavedPosition) >= 30 { savePosition() }
     }
 
     private func updateDuration(from item: AVPlayerItem) {
         let length = item.duration
-        if length.isNumeric, length.seconds > 0 { duration = length.seconds }
+        guard length.isNumeric, length.seconds > 0 else { return }
+        let before = duration
+        defer {
+            // The lock screen keeps the length it was given, so pass on any change.
+            if abs(duration - before) > 0.5 { updateNowPlaying() }
+        }
+        if let known = knownLength, known > 0, length.seconds > known * 1.5 {
+            // Doubled: show the real length and end the item there, so the queue moves on.
+            if item.forwardPlaybackEndTime != CMTime(seconds: known, preferredTimescale: 600) {
+                item.forwardPlaybackEndTime = CMTime(seconds: known, preferredTimescale: 600)
+                NSLog("[player] item reports %.1fs; using %.1fs", length.seconds, known)
+            }
+            duration = known
+        } else {
+            duration = length.seconds
+        }
     }
 
     func savePosition() {
@@ -479,9 +544,9 @@ final class PlayerController: ObservableObject {
                 if !Task.isCancelled { self?.recentSkip = nil }
             }
         case .offer(let segment):
-            offeredSkip = segment
+            if offeredSkip != segment { offeredSkip = segment }
         case .none:
-            offeredSkip = nil
+            if offeredSkip != nil { offeredSkip = nil }
         }
     }
 

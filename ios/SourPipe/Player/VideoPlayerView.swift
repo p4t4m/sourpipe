@@ -17,6 +17,9 @@ struct VideoPlayerView: UIViewControllerRepresentable {
         controller.updatesNowPlayingInfoCenter = false
         controller.delegate = context.coordinator
         context.coordinator.attach(controller, player: player)
+        #if DEBUG
+        context.coordinator.enterFullScreenForTesting()
+        #endif
         return controller
     }
 
@@ -73,5 +76,43 @@ struct VideoPlayerView: UIViewControllerRepresentable {
             inPictureInPicture = false
             onPictureInPicture(false)
         }
+
+        func playerViewController(
+            _ controller: AVPlayerViewController,
+            willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+        ) {
+            coordinator.animate(alongsideTransition: nil) { context in
+                if !context.isCancelled { Orientation.enterFullScreen() }
+            }
+        }
+
+        func playerViewController(
+            _ controller: AVPlayerViewController,
+            willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+        ) {
+            coordinator.animate(alongsideTransition: nil) { context in
+                // A cancelled swipe leaves the video full screen.
+                if !context.isCancelled { Orientation.exitFullScreen() }
+            }
+        }
+
+        #if DEBUG
+        /// CI: `-testFullscreen YES` enters full screen as the button would, through AVKit's
+        /// own method, which has no public name. Debug builds only.
+        func enterFullScreenForTesting() {
+            guard UserDefaults.standard.bool(forKey: "testFullscreen"), let controller else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak controller] in
+                let selector = NSSelectorFromString("enterFullScreenAnimated:completionHandler:")
+                guard let controller, controller.responds(to: selector) else {
+                    NSLog("[player] cannot enter full screen for the test")
+                    return
+                }
+                typealias Enter = @convention(c) (AnyObject, Selector, Bool, AnyObject?) -> Void
+                unsafeBitCast(controller.method(for: selector), to: Enter.self)(
+                    controller, selector, true, nil)
+                NSLog("[player] entered full screen for the test")
+            }
+        }
+        #endif
     }
 }

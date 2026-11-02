@@ -7,11 +7,14 @@ struct StreamView: View {
     var autoplay = true
 
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var store: AppStore
     @State private var loaded: StreamDetails?
     @State private var error: String?
     @State private var started = false
 
     private var isCurrent: Bool { player.isCurrent(url: item.url) }
+    /// A downloaded file plays offline, so the page shows what was saved and fetches nothing.
+    private var isDownload: Bool { isCurrent && player.isPlayingDownload }
 
     /// The player area shows this failure, so the list below must not keep spinning.
     private var hasFailed: Bool {
@@ -29,7 +32,9 @@ struct StreamView: View {
         VStack(spacing: 0) {
             playerArea
             List {
-                if let details {
+                if isDownload, let entry = player.current {
+                    DownloadedDetailsSection(item: entry.item)
+                } else if let details {
                     StreamDetailsSection(details: details)
                 } else if let error, !isCurrent {
                     StatusView(title: "Could not load this stream", message: error) {
@@ -53,7 +58,7 @@ struct StreamView: View {
             if isCurrent { return }
             if autoplay {
                 player.play(item)
-            } else {
+            } else if !isDownload {
                 await load()
             }
         }
@@ -78,7 +83,16 @@ struct StreamView: View {
                             .font(.footnote)
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
-                        Button("Try again") { player.play(item) }
+                        Button("Try again") {
+                            if isDownload,
+                               let record = store.library.downloads.first(where: {
+                                   $0.item.url == item.url
+                               }) {
+                                player.playDownload(record)
+                            } else {
+                                player.play(item)
+                            }
+                        }
                             .buttonStyle(.bordered)
                             .tint(.white)
                     }
@@ -86,7 +100,16 @@ struct StreamView: View {
                 case .idle:
                     EmptyView()
                 case .loading, .ready:
-                    if player.isAudioOnly {
+                    if player.isInPopup {
+                        Thumbnail(url: artworkURL).opacity(0.4)
+                        VStack(spacing: 8) {
+                            Label("Playing in popup", systemImage: "pip")
+                                .foregroundColor(.white)
+                            Button("Show here") { player.closePopup() }
+                                .buttonStyle(.bordered)
+                                .tint(.white)
+                        }
+                    } else if player.isAudioOnly {
                         Thumbnail(url: artworkURL).opacity(0.5)
                         audioControls
                     } else {
@@ -112,6 +135,8 @@ struct StreamView: View {
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .frame(maxWidth: .infinity)
+        // Opening the main player takes the video back from the popup.
+        .onAppear { if isCurrent { player.closePopup() } }
         .overlay(alignment: .topTrailing) {
             if isCurrent { SkipBanner() }
         }
@@ -119,35 +144,7 @@ struct StreamView: View {
 
     /// Audio mode has no system player controls, so it brings its own.
     private var audioControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 32) {
-                Button { player.previous() } label: { Image(systemName: "backward.end.fill") }
-                    .accessibilityLabel("Previous")
-                Button { player.skip(by: -10) } label: { Image(systemName: "gobackward.10") }
-                    .accessibilityLabel("Back 10 seconds")
-                Button { player.togglePlayPause() } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                }
-                .font(.largeTitle)
-                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-                Button { player.skip(by: 10) } label: { Image(systemName: "goforward.10") }
-                    .accessibilityLabel("Forward 10 seconds")
-                Button { player.next() } label: { Image(systemName: "forward.end.fill") }
-                    .disabled(!player.hasNext)
-                    .accessibilityLabel("Next")
-            }
-            .font(.title2)
-            .foregroundColor(.white)
-            if player.duration > 0 {
-                Slider(value: Binding(get: { player.position }, set: { player.seek(to: $0) }),
-                       in: 0...max(player.duration, 1))
-                    .tint(.white)
-                    .padding(.horizontal)
-                Text("\(Format.duration(Int64(player.position))) / \(Format.duration(Int64(player.duration)))")
-                    .font(.caption)
-                    .foregroundColor(.white)
-            }
-        }
+        AudioControls(clock: player.clock)
     }
 
     private func load() async {
@@ -164,7 +161,7 @@ struct StreamDetailsSection: View {
     let details: StreamDetails
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var downloads: DownloadManager
+    @Environment(\.controllers) private var controllers
     @State private var pane = Pane.related
     @State private var showDescription = false
     @State private var dislikes: DislikeCounts?
@@ -298,6 +295,16 @@ struct StreamDetailsSection: View {
                     Label(player.isAudioOnly ? "Show video" : "Audio only",
                           systemImage: player.isAudioOnly ? "film" : "headphones")
                 }
+                Button {
+                    if isCurrent {
+                        player.setAudioOnly(false)
+                        player.popupRequested = true
+                    } else {
+                        player.play(details.asItem, mode: .popup)
+                    }
+                } label: {
+                    Label("Popup", systemImage: "pip.enter")
+                }
                 Menu {
                     Picker("Maximum quality", selection: Binding(
                         get: { store.library.settings.maxHeight },
@@ -314,7 +321,7 @@ struct StreamDetailsSection: View {
                     if options.isEmpty { Text("Nothing downloadable") }
                     ForEach(options.indices, id: \.self) { index in
                         Button(options[index].label) {
-                            downloads.start(options[index], details: details)
+                            controllers?.downloads.start(options[index], details: details)
                         }
                     }
                 } label: {
@@ -401,6 +408,66 @@ struct QueueSection: View {
 }
 
 /// The page behind the mini player.
+/// Play controls and a time slider. Watches only the clock, so the rest of the page stays still
+/// while the time moves.
+struct AudioControls: View {
+    @ObservedObject var clock: PlaybackClock
+    @EnvironmentObject private var player: PlayerController
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 32) {
+                Button { player.previous() } label: { Image(systemName: "backward.end.fill") }
+                    .accessibilityLabel("Previous")
+                Button { player.skip(by: -10) } label: { Image(systemName: "gobackward.10") }
+                    .accessibilityLabel("Back 10 seconds")
+                Button { player.togglePlayPause() } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .font(.largeTitle)
+                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                Button { player.skip(by: 10) } label: { Image(systemName: "goforward.10") }
+                    .accessibilityLabel("Forward 10 seconds")
+                Button { player.next() } label: { Image(systemName: "forward.end.fill") }
+                    .disabled(!player.hasNext)
+                    .accessibilityLabel("Next")
+            }
+            .font(.title2)
+            .foregroundColor(.white)
+            if clock.duration > 0 {
+                Slider(value: Binding(get: { clock.position }, set: { player.seek(to: $0) }),
+                       in: 0...max(clock.duration, 1))
+                    .tint(.white)
+                    .padding(.horizontal)
+                Text("\(Format.duration(Int64(clock.position))) / \(Format.duration(Int64(clock.duration)))")
+                    .font(.caption)
+                    .foregroundColor(.white)
+            }
+        }
+    }
+}
+
+/// The page for a downloaded file: what was saved with it, and no network.
+struct DownloadedDetailsSection: View {
+    let item: InfoItem
+    @EnvironmentObject private var player: PlayerController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.name).font(.headline)
+            let subtitle = Format.subtitle(for: item)
+            if !subtitle.isEmpty {
+                Text(subtitle).font(.caption).foregroundColor(.secondary)
+            }
+        }
+        Label("Playing from download", systemImage: "arrow.down.circle.fill")
+            .font(.footnote)
+            .foregroundColor(.secondary)
+            .listRowSeparator(.hidden)
+        if player.queue.count > 1 { QueueSection() }
+    }
+}
+
 struct NowPlayingScreen: View {
     @EnvironmentObject private var player: PlayerController
 

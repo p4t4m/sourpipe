@@ -128,7 +128,6 @@ final class FeedModel: ObservableObject {
 
 struct FeedView: View {
     @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerController
     @StateObject private var model = FeedModel()
     @State private var groupID: UUID?
 
@@ -143,6 +142,7 @@ struct FeedView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             if store.library.subscriptions.isEmpty {
                 VStack(spacing: 8) {
                     Text("No subscriptions yet").font(.headline)
@@ -184,12 +184,7 @@ struct FeedView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    player.play(visibleItems, startingAt: 0)
-                } label: {
-                    Label("Play all", systemImage: "play")
-                }
-                .disabled(visibleItems.isEmpty)
+                PlayAllMenu(items: visibleItems)
             }
         }
         .refreshable {
@@ -206,6 +201,7 @@ struct SubscriptionsView: View {
 
     var body: some View {
         List {
+            HomeTabsSlot()
             ForEach(store.library.subscriptions) { subscription in
                 NavigationLink(value: Route.channel(serviceId: subscription.serviceId,
                                                     url: subscription.url,
