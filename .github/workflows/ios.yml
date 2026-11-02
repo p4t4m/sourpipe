@@ -1,22 +1,22 @@
 name: iOS
+# macOS runners cost ten times the free minutes of Linux ones, so this runs only for main, pull
+# requests and by hand (Actions > iOS > Run workflow), and not for documentation-only changes.
 on:
   push:
+    branches: [main]
+    paths-ignore: ["**.md", "screenshots/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "screenshots/**", "LICENSE"]
   workflow_dispatch:
 
 jobs:
-  core-tests:
+  simulator-build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Test the platform-neutral core
         working-directory: ios
         run: swift test
-
-  simulator-build:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
       - name: Build for the simulator
         working-directory: ios
         run: |

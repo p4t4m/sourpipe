@@ -114,7 +114,7 @@ or later.
 
 ### Without a Mac
 
-Each commit builds an unsigned IPA. Open the newest successful run of the
+Each change to `main` builds an unsigned IPA. Open the newest successful run of the
 [iOS workflow](https://github.com/p4t4m/sourpipe/actions/workflows/ios.yml) and download the
 `SourPipe-unsigned-ipa` artifact (GitHub requires signing in, and keeps artifacts for 90 days). Then
 sign and install it with a sideloading tool:
