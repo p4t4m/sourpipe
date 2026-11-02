@@ -272,9 +272,9 @@ final class PlayerController: ObservableObject {
             let expected = current?.id
             loadTask = Task { [weak self] in
                 do {
-                    let item = try await Self.mergedItem(video: video, audio: audio)
+                    let asset = try await Self.mergedAsset(video: video, audio: audio)
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
-                    self.attach(item, resumeAt: seconds)
+                    self.attach(AVPlayerItem(asset: asset), resumeAt: seconds)
                 } catch {
                     guard let self, !Task.isCancelled, self.current?.id == expected else { return }
                     NSLog("[player] merge failed: %@", error.localizedDescription)
@@ -284,7 +284,7 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    nonisolated private static func mergedItem(video: URL, audio: URL) async throws -> AVPlayerItem {
+    nonisolated private static func mergedAsset(video: URL, audio: URL) async throws -> AVMutableComposition {
         let composition = AVMutableComposition()
         let videoAsset = AVURLAsset(url: video)
         let audioAsset = AVURLAsset(url: audio)
@@ -302,7 +302,7 @@ final class PlayerController: ObservableObject {
         try composition.addMutableTrack(withMediaType: .audio,
                                         preferredTrackID: kCMPersistentTrackID_Invalid)?
             .insertTimeRange(audioRange, of: audioTrack, at: .zero)
-        return AVPlayerItem(asset: composition)
+        return composition
     }
 
     private func attach(_ item: AVPlayerItem, resumeAt seconds: Double) {

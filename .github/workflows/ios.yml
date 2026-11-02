@@ -41,9 +41,28 @@ jobs:
           xcrun simctl io "$device" screenshot home.png
           # launch only reports start-up; a crash since then leaves the app absent from this list.
           xcrun simctl spawn "$device" launchctl list | grep -q app.sourpipe.SourPipe
+      - name: Open a video by link and capture playback
+        if: always()
+        working-directory: ios
+        run: |
+          device="$(xcrun simctl list devices booted -j | python3 -c "
+          import json,sys
+          for devices in json.load(sys.stdin)['devices'].values():
+              for d in devices:
+                  print(d['udid']); raise SystemExit")"
+          xcrun simctl openurl "$device" "sourpipe://open?url=https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+          sleep 40
+          xcrun simctl io "$device" screenshot playing-1.png
+          sleep 15
+          xcrun simctl io "$device" screenshot playing-2.png
+          xcrun simctl spawn "$device" log show --last 3m --style compact \
+            --predicate 'eventMessage CONTAINS "[player]" OR eventMessage CONTAINS "[extractor]"' > player.log || true
+          cat player.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: simulator-screenshot
-          path: ios/home.png
+          path: |
+            ios/*.png
+            ios/player.log
           if-no-files-found: warn

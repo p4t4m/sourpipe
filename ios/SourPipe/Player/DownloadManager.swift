@@ -97,11 +97,12 @@ final class DownloadManager: ObservableObject {
         return keep
     }
 
-    private final class Progress: NSObject, URLSessionTaskDelegate {
-        private let report: (Double) -> Void
+    /// URLSession calls this once, before any progress can be reported.
+    private final class Progress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let report: @Sendable (Double) -> Void
         private var observation: NSKeyValueObservation?
 
-        init(report: @escaping (Double) -> Void) {
+        init(report: @escaping @Sendable (Double) -> Void) {
             self.report = report
         }
 
