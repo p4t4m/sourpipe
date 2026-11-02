@@ -451,6 +451,11 @@ final class PlayerController: ObservableObject {
     private func updateDuration(from item: AVPlayerItem) {
         let length = item.duration
         guard length.isNumeric, length.seconds > 0 else { return }
+        let before = duration
+        defer {
+            // The lock screen keeps the length it was given, so pass on any change.
+            if abs(duration - before) > 0.5 { updateNowPlaying() }
+        }
         if let known = knownLength, known > 0, length.seconds > known * 1.5 {
             // Doubled: show the real length and end the item there, so the queue moves on.
             if item.forwardPlaybackEndTime != CMTime(seconds: known, preferredTimescale: 600) {
