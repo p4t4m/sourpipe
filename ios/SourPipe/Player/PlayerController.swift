@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Combine
 import MediaPlayer
 import UIKit
@@ -315,6 +315,7 @@ final class PlayerController: ObservableObject {
                 switch status {
                 case .readyToPlay:
                     self.state = .ready
+                    NSLog("[player] ready: %@", self.sourceLabel)
                     self.updateDuration(from: item)
                     self.updateNowPlaying()
                 case .failed:

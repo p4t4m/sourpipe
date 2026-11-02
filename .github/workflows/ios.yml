@@ -41,7 +41,7 @@ jobs:
           xcrun simctl io "$device" screenshot home.png
           # launch only reports start-up; a crash since then leaves the app absent from this list.
           xcrun simctl spawn "$device" launchctl list | grep -q app.sourpipe.SourPipe
-      - name: Open a video by link and capture playback
+      - name: Open a video and capture playback
         if: always()
         working-directory: ios
         run: |
@@ -50,7 +50,9 @@ jobs:
           for devices in json.load(sys.stdin)['devices'].values():
               for d in devices:
                   print(d['udid']); raise SystemExit")"
-          xcrun simctl openurl "$device" "sourpipe://open?url=https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+          xcrun simctl terminate "$device" app.sourpipe.SourPipe || true
+          xcrun simctl launch "$device" app.sourpipe.SourPipe \
+            -openLink "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
           sleep 40
           xcrun simctl io "$device" screenshot playing-1.png
           sleep 15
@@ -66,3 +68,22 @@ jobs:
             ios/*.png
             ios/player.log
           if-no-files-found: warn
+
+  device-ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build an unsigned IPA for sideloading
+        working-directory: ios
+        run: |
+          xcodebuild -project SourPipe.xcodeproj -scheme SourPipe -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/SourPipe.app Payload/
+          zip -qry SourPipe-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SourPipe-unsigned-ipa
+          path: ios/SourPipe-unsigned.ipa
+          if-no-files-found: error

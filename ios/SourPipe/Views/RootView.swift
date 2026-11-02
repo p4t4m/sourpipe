@@ -105,6 +105,14 @@ struct RootView: View {
             Text(linkError ?? "")
         }
         .onOpenURL { open($0) }
+        #if DEBUG
+        // CI launches with `-openLink <url>`: a sourpipe:// link would stop at a system prompt.
+        .task {
+            if let link = UserDefaults.standard.string(forKey: "openLink") {
+                linkTarget = try? await LinkResolver.route(for: link)
+            }
+        }
+        #endif
     }
 
     /// Handles sourpipe://open?url=<link>, and links rewritten as sourpipe://host/path.
