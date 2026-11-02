@@ -66,7 +66,6 @@ struct LibraryView: View {
 struct LocalPlaylistView: View {
     let id: UUID
     @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerController
     @State private var renaming = false
     @State private var newName = ""
 

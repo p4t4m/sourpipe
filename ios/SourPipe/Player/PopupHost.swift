@@ -7,7 +7,8 @@ import UIKit
 /// that is in the window, so a tiny one sits behind the app. It holds the player only while the
 /// popup is wanted: an attached layer would make iOS pause playback in the background.
 struct PopupHost: UIViewRepresentable {
-    @ObservedObject var player: PlayerController
+    /// Not observed: the coordinator subscribes to just the popup requests it needs.
+    let player: PlayerController
     /// Called when the user taps the popup's button to return to the app.
     var onRestore: () -> Void
 

@@ -4,6 +4,13 @@ import MediaPlayer
 import UIKit
 
 /// The single app-wide player: a queue, source fallback, background audio and lock-screen controls.
+/// The playback time, kept apart from PlayerController so that only the views showing it redraw.
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published fileprivate(set) var position: Double = 0
+    @Published fileprivate(set) var duration: Double = 0
+}
+
 @MainActor
 final class PlayerController: ObservableObject {
     enum State: Equatable {
@@ -34,8 +41,15 @@ final class PlayerController: ObservableObject {
     @Published private(set) var details: StreamDetails?
     @Published private(set) var isPlaying = false
     @Published private(set) var sourceLabel = ""
-    @Published private(set) var position: Double = 0
-    @Published private(set) var duration: Double = 0
+    /// Changes twice a second, so it is not published here: every view watching the player would
+    /// redraw. Views that show the time watch `clock` instead.
+    private(set) var position: Double = 0 {
+        didSet { if clock.position != position { clock.position = position } }
+    }
+    private(set) var duration: Double = 0 {
+        didSet { if clock.duration != duration { clock.duration = duration } }
+    }
+    let clock = PlaybackClock()
     @Published private(set) var isAudioOnly = false
     @Published private(set) var segments: [SponsorSegment] = []
     /// A segment the user can skip with a button.
@@ -97,8 +111,10 @@ final class PlayerController: ObservableObject {
         rateObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             let playing = player.timeControlStatus != .paused
             Task { @MainActor in
-                self?.isPlaying = playing
-                self?.updateNowPlaying()
+                guard let self, self.isPlaying != playing else { return }
+                self.isPlaying = playing
+                if !playing { self.savePosition() }
+                self.updateNowPlaying()
             }
         }
         timeObserver = player.addPeriodicTimeObserver(
@@ -445,7 +461,9 @@ final class PlayerController: ObservableObject {
         position = time.seconds
         applySkips()
         if let item = player.currentItem { updateDuration(from: item) }
-        if abs(position - lastSavedPosition) >= 10 { savePosition() }
+        // Each save redraws library views and rewrites the library file; pausing, stopping,
+        // changing video and leaving the app also save.
+        if abs(position - lastSavedPosition) >= 30 { savePosition() }
     }
 
     private func updateDuration(from item: AVPlayerItem) {
@@ -526,9 +544,9 @@ final class PlayerController: ObservableObject {
                 if !Task.isCancelled { self?.recentSkip = nil }
             }
         case .offer(let segment):
-            offeredSkip = segment
+            if offeredSkip != segment { offeredSkip = segment }
         case .none:
-            offeredSkip = nil
+            if offeredSkip != nil { offeredSkip = nil }
         }
     }
 

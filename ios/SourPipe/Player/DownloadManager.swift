@@ -43,7 +43,13 @@ final class DownloadManager: ObservableObject {
 
     private func update(_ id: UUID, _ change: (inout Job) -> Void) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
-        change(&jobs[index])
+        var job = jobs[index]
+        change(&job)
+        // Writing to the array publishes even when nothing changed.
+        let old = jobs[index]
+        if job.progress != old.progress || job.phase != old.phase || job.error != old.error {
+            jobs[index] = job
+        }
     }
 
     private func run(id: UUID, source: PlaybackSource, details: StreamDetails) async {
@@ -97,7 +103,11 @@ final class DownloadManager: ObservableObject {
     private func fetch(_ url: URL, id: UUID, from: Double, to: Double) async throws -> URL {
         try await Self.fetchInChunks(url) { [weak self] fraction in
             Task { @MainActor in
-                self?.update(id) { $0.progress = from + (to - from) * min(fraction, 1) }
+                let value = from + (to - from) * min(fraction, 1)
+                self?.update(id) { job in
+                    // Each change redraws every view watching downloads.
+                    if abs(job.progress - value) >= 0.005 { job.progress = value }
+                }
             }
         }
     }
@@ -203,8 +213,13 @@ final class DownloadManager: ObservableObject {
         }
 
         func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+            // This fires for every packet; the UI only needs whole percents.
+            var last = -1.0
             observation = task.progress.observe(\.fractionCompleted) { [report] progress, _ in
-                report(progress.fractionCompleted)
+                let fraction = progress.fractionCompleted
+                guard fraction - last >= 0.01 || fraction >= 1 else { return }
+                last = fraction
+                report(fraction)
             }
         }
     }

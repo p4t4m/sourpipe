@@ -62,8 +62,9 @@ extension View {
 
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var downloads: DownloadManager
+    /// Not observed: the root would redraw every tab whenever playback or a download changes.
+    let player: PlayerController
+    let downloads: DownloadManager
     @State private var showingPlayer = false
     @State private var linkTarget: Route?
     @State private var linkError: String?

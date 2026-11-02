@@ -128,7 +128,6 @@ final class FeedModel: ObservableObject {
 
 struct FeedView: View {
     @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerController
     @StateObject private var model = FeedModel()
     @State private var groupID: UUID?
 

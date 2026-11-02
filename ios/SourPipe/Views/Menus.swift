@@ -32,8 +32,10 @@ struct RoutedStack<Content: View>: View {
 struct StreamItemMenu: View {
     let item: InfoItem
     @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(\.controllers) private var controllers
     @EnvironmentObject private var router: Router
+
+    private var player: PlayerController? { controllers?.player }
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -44,11 +46,11 @@ struct StreamItemMenu: View {
 
     @ViewBuilder private func entry(_ entry: StreamMenuEntry) -> some View {
         switch entry {
-        case .background: button(entry) { player.play(item, mode: .background) }
-        case .popup: button(entry) { player.play(item, mode: .popup) }
-        case .play: button(entry) { player.play(item) }
-        case .enqueue: button(entry) { player.enqueue(item) }
-        case .enqueueNext: button(entry) { player.enqueueNext(item) }
+        case .background: button(entry) { player?.play(item, mode: .background) }
+        case .popup: button(entry) { player?.play(item, mode: .popup) }
+        case .play: button(entry) { player?.play(item) }
+        case .enqueue: button(entry) { player?.enqueue(item) }
+        case .enqueueNext: button(entry) { player?.enqueueNext(item) }
         case .download: button(entry) { router.downloadItem = item }
         case .addToPlaylist: AddToPlaylistMenu(item: item)
         case .share:
@@ -127,23 +129,23 @@ struct DownloadSheet: View {
 /// NewPipe's buttons above a list of videos: play it all in the player, the background or a popup.
 struct PlayAllButtons: View {
     let items: [InfoItem]
-    @EnvironmentObject private var player: PlayerController
+    @Environment(\.controllers) private var controllers
 
     var body: some View {
         HStack(spacing: 8) {
-            Button { player.play(items, startingAt: 0) } label: {
+            Button { controllers?.player.play(items, startingAt: 0) } label: {
                 Label("Play all", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
             }
-            Button { player.play(items, startingAt: 0, mode: .background) } label: {
+            Button { controllers?.player.play(items, startingAt: 0, mode: .background) } label: {
                 Label("Background", systemImage: "headphones")
                     .frame(maxWidth: .infinity)
             }
-            Button { player.play(items, startingAt: 0, mode: .popup) } label: {
+            Button { controllers?.player.play(items, startingAt: 0, mode: .popup) } label: {
                 Label("Popup", systemImage: "pip.enter")
                     .frame(maxWidth: .infinity)
             }
-            Button { player.play(items.shuffled(), startingAt: 0) } label: {
+            Button { controllers?.player.play(items.shuffled(), startingAt: 0) } label: {
                 Image(systemName: "shuffle")
             }
             .accessibilityLabel("Shuffle")
@@ -169,25 +171,43 @@ private struct CompactLabelStyle: LabelStyle {
 /// The same choices for a toolbar, where buttons do not fit.
 struct PlayAllMenu: View {
     let items: [InfoItem]
-    @EnvironmentObject private var player: PlayerController
+    @Environment(\.controllers) private var controllers
 
     var body: some View {
         Menu {
-            Button { player.play(items, startingAt: 0) } label: {
+            Button { controllers?.player.play(items, startingAt: 0) } label: {
                 Label("Play all", systemImage: "play.fill")
             }
-            Button { player.play(items, startingAt: 0, mode: .background) } label: {
+            Button { controllers?.player.play(items, startingAt: 0, mode: .background) } label: {
                 Label("Play all in background", systemImage: "headphones")
             }
-            Button { player.play(items, startingAt: 0, mode: .popup) } label: {
+            Button { controllers?.player.play(items, startingAt: 0, mode: .popup) } label: {
                 Label("Play all in popup", systemImage: "pip.enter")
             }
-            Button { player.play(items.shuffled(), startingAt: 0) } label: {
+            Button { controllers?.player.play(items.shuffled(), startingAt: 0) } label: {
                 Label("Shuffle", systemImage: "shuffle")
             }
         } label: {
             Label("Play all", systemImage: "play")
         }
         .disabled(!items.contains { $0.type == .stream })
+    }
+}
+
+/// References to the player and downloads for views that only act on them. Unlike
+/// @EnvironmentObject this does not observe, so long lists do not redraw when playback changes.
+struct Controllers {
+    let player: PlayerController
+    let downloads: DownloadManager
+}
+
+private struct ControllersKey: EnvironmentKey {
+    static let defaultValue: Controllers? = nil
+}
+
+extension EnvironmentValues {
+    var controllers: Controllers? {
+        get { self[ControllersKey.self] }
+        set { self[ControllersKey.self] = newValue }
     }
 }
