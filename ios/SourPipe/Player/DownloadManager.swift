@@ -77,7 +77,7 @@ final class DownloadManager: ObservableObject {
                 update(id) { $0.phase = "Combining" }
                 try await Self.export(
                     MediaMerge.composition(video: videoFile, audio: audioFile,
-                                           expected: details.duration.map(Double.init)),
+                                           expected: Double(details.duration)),
                     to: destination, type: .mp4)
             }
             let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0

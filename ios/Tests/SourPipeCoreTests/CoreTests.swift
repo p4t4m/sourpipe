@@ -513,7 +513,8 @@ final class CoreTests: XCTestCase {
         let asset = AVURLAsset(url: url)
         let declared = try await asset.load(.duration).seconds
         print("fragmented fixture: AVFoundation says \(declared)s, index says \(indexed)s")
-        let track = try await XCTUnwrap(asset.loadTracks(withMediaType: .audio).first)
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        let track = try XCTUnwrap(tracks.first)
         let composition = AVMutableComposition()
         let length = min(CMTime(seconds: declared, preferredTimescale: 600),
                          CMTime(seconds: indexed, preferredTimescale: 600))

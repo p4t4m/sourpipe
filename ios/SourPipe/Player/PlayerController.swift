@@ -326,7 +326,7 @@ final class PlayerController: ObservableObject {
                 self.attach(AVPlayerItem(asset: asset), resumeAt: seconds_)
             }
         case .merged(let video, let audio, _):
-            let duration = details?.duration.map(Double.init)
+            let duration = details.map { Double($0.duration) }
             loadTask = Task { [weak self] in
                 do {
                     let asset = try await MediaMerge.composition(video: video, audio: audio,
